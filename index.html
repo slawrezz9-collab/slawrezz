@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SLAW REZZ — Kadın Giyim | Etek, Elbise, Şort Etek</title>
+<meta name="description" content="SLAW REZZ kadın giyim: şort etek, elbise, bluz ve daha fazlası. Türkiye'de üretim, hızlı kargo, güvenli ödeme.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900;1,700;1,900&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/stil.css">
+</head>
+<body data-kok="">
+<div class="duyuru">1.500 TL üzeri kargo bedava — WhatsApp sipariş: 0541 348 39 45</div>
+<header class="ustbar">
+  <a class="logo" href="index.html">SLAW <em>REZZ</em></a>
+  <nav class="menu">
+    <a class="aktif" href="index.html">Mağaza</a>
+    <a href="index.html#koleksiyon">Koleksiyon</a>
+    <a href="hukuk/iletisim.html">İletişim</a>
+  </nav>
+  <div class="ust-ikonlar">
+    <a href="hesap.html">Hesabım</a>
+    <a class="sepet-link" href="sepet.html">Sepet<span class="sepet-sayac" style="display:none">0</span></a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-yazi">
+    <span class="hero-etiket" id="heroEtiket">Yeni Sezon — Kadın Giyim</span>
+    <h1 id="heroBaslik">Tarzını<br><em>sen</em> belirle.</h1>
+    <p id="heroAciklama">Şort etekten abiyeye, günlükten spora — Türkiye'de üretilen tasarımlar, kapına kadar.</p>
+    <a class="buton" href="#koleksiyon">Koleksiyonu Keşfet ↓</a>
+    <div id="magazaRozet"></div>
+  </div>
+  <div class="hero-gorsel" id="heroGorsel"><img id="heroImg" alt="SLAW REZZ koleksiyon" loading="eager"></div>
+</section>
+
+<main class="bolum" id="koleksiyon">
+  <div class="bolum-baslik">
+    <h2>Koleksiyon</h2>
+    <div class="form-alan" style="margin:0;min-width:180px">
+      <select id="siralama">
+        <option value="yorum">En çok değerlendirilen</option>
+        <option value="one">Öne çıkanlar</option>
+        <option value="artan">Fiyat: düşükten yükseğe</option>
+        <option value="azalan">Fiyat: yüksekten düşüğe</option>
+        <option value="indirim">En yüksek indirim</option>
+      </select>
+    </div>
+  </div>
+  <div class="filtreler" id="filtreler"></div>
+  <div class="izgara" id="izgara"></div>
+</main>
+
+<footer>
+  <div class="alt-izgara">
+    <div>
+      <div class="alt-logo">SLAW REZZ</div>
+      <p style="font-size:.85rem;opacity:.7;max-width:30ch">Kadın giyimde kendi tarzını arayanlar için, Türkiye'den.</p>
+    </div>
+    <div>
+      <h4>Mağaza</h4>
+      <a href="index.html">Tüm Ürünler</a>
+      <a href="sepet.html">Sepetim</a>
+      <a href="hesap.html">Hesabım</a>
+    </div>
+    <div>
+      <h4>Yardım</h4>
+      <a href="hukuk/iade.html">İade &amp; Değişim</a>
+      <a href="hukuk/iletisim.html">İletişim</a>
+      <a id="altWp" href="#" target="_blank" rel="noopener">WhatsApp Destek</a>
+    </div>
+    <div>
+      <h4>Yasal</h4>
+      <a href="hukuk/kvkk.html">KVKK Aydınlatma Metni</a>
+      <a href="hukuk/mesafeli-satis.html">Mesafeli Satış Sözleşmesi</a>
+      <a href="hukuk/cerez.html">Çerez Politikası</a>
+    </div>
+  </div>
+  <div class="telif">
+    <span>© <span data-yil></span> SLAW REZZ — Tüm hakları saklıdır.</span>
+    <span>Güvenli ödeme: iyzico ile 3D Secure</span>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/magaza.js"></script>
+<script>
+(async function () {
+  SLAW.olayKaydet("sayfa");
+  const ayarlar = await SLAW.ayarlariUygula();
+  const modeller = (await SLAW.urunleriGetir()).filter(m => m.aktif && m.toplamStok > 0);
+  const yorumVeri = await SLAW.yorumlariGetir();
+  const yorumSayisi = (id) => yorumVeri.urunler?.[id]?.sayi || 0;
+
+  // hero yazıları (Mağaza panelinden özelleştirilebilir)
+  if (ayarlar.heroEtiket) document.getElementById("heroEtiket").textContent = ayarlar.heroEtiket;
+  if (ayarlar.heroBaslik) document.getElementById("heroBaslik").textContent = ayarlar.heroBaslik;
+  if (ayarlar.heroAciklama) document.getElementById("heroAciklama").textContent = ayarlar.heroAciklama;
+
+  // mağaza puan rozeti (veri/yorumlar.json'dan otomatik)
+  const mg = yorumVeri.magaza || {};
+  if (mg.toplam) {
+    document.getElementById("magazaRozet").innerHTML =
+      `<a class="puan-rozet" href="${SLAW.config.trendyolUrl}" target="_blank" rel="noopener">
+        <span class="yildiz">★</span> <b>${mg.ortalama}</b>
+        <span>— Trendyol'da ${mg.toplam.toLocaleString("tr-TR")} değerlendirme</span>
+        <span class="git">gör</span></a>`;
+  }
+  const izgara = document.getElementById("izgara");
+  const filtreKutu = document.getElementById("filtreler");
+  let secilenKategori = "Tümü", secilenSira = "yorum";
+
+  // renk sayısı bilgisi (tüm renkler listede ayrı kart olarak görünür)
+  const grupSayilari = new Map();
+  modeller.forEach(m => {
+    const k = SLAW.grupAnahtari(m);
+    grupSayilari.set(k, (grupSayilari.get(k) || 0) + 1);
+  });
+
+  // hero sağ alanı: flaş ürünler varsa vitrin, yoksa görsel
+  const flaslar = modeller.filter(m => m.flas).slice(0, 4);
+  if (flaslar.length) {
+    const sinif = flaslar.length === 1 ? "" : "c" + flaslar.length;
+    document.getElementById("heroGorsel").innerHTML =
+      `<div class="flas-vitrin ${sinif}">` + flaslar.map(m => {
+        const ind = SLAW.indirimBilgi(m);
+        return `<a class="flas-kart" href="urun.html?id=${encodeURIComponent(m.id)}">
+          <img src="${m.gorseller[0] || ""}" alt="${m.ad}">
+          <span class="flas-etiket">⚡ Flaş Ürün</span>
+          <span class="flas-alt">
+            <span class="ad">${m.ad}</span>
+            <span class="fiyatlar"><b class="yeni">${SLAW.para(m.satisFiyat)}</b>
+              ${ind ? `<s class="eski">${SLAW.para(m.listeFiyat)}</s><span class="fiyat-yuzde">−%${ind.yuzde}</span>` : ""}</span>
+          </span></a>`;
+      }).join("") + "</div>";
+  } else if (ayarlar.heroGorsel || modeller[0]?.gorseller[0]) {
+    document.getElementById("heroImg").src = ayarlar.heroGorsel || modeller[0].gorseller[0];
+  }
+
+  // kategori filtreleri
+  const kategoriler = ["Tümü", ...new Set(modeller.map(m => m.kategori).filter(Boolean))];
+  kategoriler.forEach(k => {
+    const b = document.createElement("button");
+    b.className = "filtre" + (k === "Tümü" ? " aktif" : "");
+    b.textContent = k;
+    b.onclick = () => {
+      secilenKategori = k;
+      filtreKutu.querySelectorAll(".filtre").forEach(x => x.classList.toggle("aktif", x === b));
+      ciz();
+    };
+    filtreKutu.appendChild(b);
+  });
+
+  document.getElementById("siralama").onchange = (e) => { secilenSira = e.target.value; ciz(); };
+
+  function ciz() {
+    let liste = secilenKategori === "Tümü" ? modeller.slice()
+      : modeller.filter(m => m.kategori === secilenKategori);
+    if (secilenSira === "yorum") liste.sort((a, b) => yorumSayisi(b.id) - yorumSayisi(a.id));
+    if (secilenSira === "artan") liste.sort((a, b) => a.satisFiyat - b.satisFiyat);
+    if (secilenSira === "azalan") liste.sort((a, b) => b.satisFiyat - a.satisFiyat);
+    if (secilenSira === "indirim") liste.sort((a, b) =>
+      (SLAW.indirimBilgi(b)?.yuzde || 0) - (SLAW.indirimBilgi(a)?.yuzde || 0));
+    izgara.innerHTML = liste.map((m, i) => {
+      const ind = SLAW.indirimBilgi(m);
+      return `
+      <a class="kart" href="urun.html?id=${encodeURIComponent(m.id)}" style="animation-delay:${Math.min(i * 40, 400)}ms">
+        <div class="kart-gorsel">
+          ${ind?.etiket ? `<div class="avantaj-balon ${ind.sinif}">${ind.etiket}</div>` : ""}
+          ${m.flas ? '<span class="flas-rozet">⚡ Flaş</span>' : ""}
+          <img class="bir" src="${m.gorseller[0] || ""}" alt="${m.ad}" loading="lazy">
+          ${m.gorseller[1] ? `<img class="iki" src="${m.gorseller[1]}" alt="" loading="lazy">` : ""}
+        </div>
+        <div class="kart-ad">${m.ad}</div>
+        ${yorumVeri.urunler?.[m.id] ? `<div class="kart-yildiz">${SLAW.yildizlar(yorumVeri.urunler[m.id].ortalama)} <span>(${yorumVeri.urunler[m.id].sayi})</span></div>` : ""}
+        <div class="kart-alt">
+          <span class="fiyat-blok">
+            ${ind ? `<s class="fiyat-eski">${SLAW.para(m.listeFiyat)}</s>` : ""}
+            <span class="kart-fiyat ${ind ? "fiyat-indirimli" : ""}">${SLAW.para(m.satisFiyat)}</span>
+            ${ind ? `<span class="fiyat-yuzde">−%${ind.yuzde}</span>` : ""}
+          </span>
+          <span class="kart-kategori">${m.kategori || ""}</span>
+        </div>
+        ${m.renk || grupSayilari.get(SLAW.grupAnahtari(m)) > 1
+          ? `<div class="kart-renk">${m.renk || ""}${grupSayilari.get(SLAW.grupAnahtari(m)) > 1
+            ? (m.renk ? " — " : "") + grupSayilari.get(SLAW.grupAnahtari(m)) + " renk seçeneği" : ""}</div>` : ""}
+        <div class="kart-iade">15 gün içinde ücretsiz iade</div>
+      </a>`;
+    }).join("");
+  }
+  ciz();
+
+  document.getElementById("altWp").href = SLAW.whatsappLinki("Merhaba, bir sorum olacaktı.");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sepetim — SLAW REZZ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900;1,700;1,900&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/stil.css">
+</head>
+<body data-kok="">
+<div class="duyuru">1.500 TL üzeri kargo bedava — WhatsApp sipariş: 0541 348 39 45</div>
+<header class="ustbar">
+  <a class="logo" href="index.html">SLAW <em>REZZ</em></a>
+  <nav class="menu">
+    <a href="index.html">Mağaza</a>
+    <a href="hukuk/iletisim.html">İletişim</a>
+  </nav>
+  <div class="ust-ikonlar">
+    <a href="hesap.html">Hesabım</a>
+    <a class="sepet-link" href="sepet.html">Sepet<span class="sepet-sayac" style="display:none">0</span></a>
+  </div>
+</header>
+
+<main class="bolum">
+  <div class="bolum-baslik"><h2>Sepetim <em id="adetBilgi"></em></h2></div>
+  <div id="icerik"></div>
+</main>
+
+<footer>
+  <div class="telif">
+    <span>© <span data-yil></span> SLAW REZZ</span>
+    <span><a href="hukuk/kvkk.html" style="text-decoration:underline">KVKK</a> · <a href="hukuk/mesafeli-satis.html" style="text-decoration:underline">Mesafeli Satış</a></span>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/magaza.js"></script>
+<script>
+async function ciz() {
+  const d = await SLAW.sepetDetay();
+  const kok = document.getElementById("icerik");
+  document.getElementById("adetBilgi").textContent =
+    d.satirlar.length ? "— " + d.satirlar.reduce((t, s) => t + s.adet, 0) + " ürün" : "";
+
+  if (!d.satirlar.length) {
+    kok.innerHTML = `<div class="bos-durum">
+      <div class="buyuk-harf">Sepetiniz boş</div>
+      <p>Koleksiyona göz atıp beğendiklerinizi ekleyin.</p><br>
+      <a class="buton" href="index.html#koleksiyon">Alışverişe Başla</a></div>`;
+    return;
+  }
+
+  kok.innerHTML = `
+  <div class="sepet-duzen">
+    <div>
+      ${d.satirlar.map(s => `
+      <div class="sepet-satir">
+        <a href="urun.html?id=${encodeURIComponent(s.id)}"><img src="${s.urun.gorseller[0] || ""}" alt=""></a>
+        <div>
+          <div class="kart-ad"><a href="urun.html?id=${encodeURIComponent(s.id)}">${s.urun.ad}</a></div>
+          <div class="kart-kategori">Beden: ${s.beden}</div>
+          <div class="adet-kutu" style="margin-top:.4rem">
+            <button data-islem="azalt" data-id="${s.id}" data-beden="${s.beden}">−</button>
+            <span>${s.adet}</span>
+            <button data-islem="artir" data-id="${s.id}" data-beden="${s.beden}">+</button>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="kart-fiyat">${SLAW.para(s.tutar)}</div>
+          <button data-islem="sil" data-id="${s.id}" data-beden="${s.beden}"
+            style="background:none;border:none;font-size:.75rem;color:var(--gul);text-decoration:underline;margin-top:.5rem">Kaldır</button>
+        </div>
+      </div>`).join("")}
+
+      <div style="margin-top:2rem">
+        <h3 style="font-family:var(--serif);margin-bottom:1rem">Teslimat Bilgileri</h3>
+        <div class="form-alan"><label>Ad Soyad *</label><input id="fAd" autocomplete="name"></div>
+        <div class="form-alan"><label>Telefon *</label><input id="fTel" autocomplete="tel" placeholder="05__ ___ __ __"></div>
+        <div class="form-alan"><label>E-posta</label><input id="fEposta" type="email" autocomplete="email"></div>
+        <div class="form-alan"><label>Adres *</label><textarea id="fAdres" rows="3"></textarea></div>
+        <div class="form-alan"><label>İl / İlçe *</label><input id="fSehir" placeholder="İstanbul / Kadıköy"></div>
+        <div class="onay-satir"><input type="checkbox" id="onaySozlesme">
+          <span><a href="hukuk/mesafeli-satis.html" target="_blank" style="text-decoration:underline">Mesafeli Satış Sözleşmesi</a>'ni ve
+          <a href="hukuk/kvkk.html" target="_blank" style="text-decoration:underline">KVKK Aydınlatma Metni</a>'ni okudum, kabul ediyorum. *</span></div>
+      </div>
+    </div>
+
+    <div class="ozet-kutu">
+      <div class="ozet-satir"><span>Ara toplam</span><span>${SLAW.para(d.araToplam)}</span></div>
+      <div class="ozet-satir"><span>Kargo</span><span>${d.kargo ? SLAW.para(d.kargo) : "Ücretsiz"}</span></div>
+      ${d.kargo ? `<div class="ozet-satir" style="font-size:.78rem;color:var(--gul)">
+        ${SLAW.para(SLAW.config.ucretsizKargoLimiti - d.araToplam)} daha ekleyin, kargo bedava!</div>` : ""}
+      <div style="display:flex;gap:.5rem;margin:.7rem 0">
+        <input id="kuponKod" placeholder="Kupon kodu" style="flex:1;border:1px solid var(--cizgi);padding:.5rem .7rem;font-family:inherit;text-transform:uppercase">
+        <button class="buton ikincil mini" id="kuponBtn" style="font-size:.72rem;padding:.4rem .9rem">Uygula</button>
+      </div>
+      <div id="kuponSatir"></div>
+      <div class="ozet-satir toplam"><span>Toplam</span><span id="toplamTutar">${SLAW.para(d.toplam)}</span></div>
+      <br>
+      <button class="buton" id="odeBtn" style="width:100%;justify-content:center">Güvenli Öde — iyzico</button>
+      <div style="text-align:center;margin:.7rem 0;font-size:.75rem;color:var(--murekkep-yum)">veya</div>
+      <a class="buton ikincil" id="wpSiparis" target="_blank" rel="noopener"
+         style="width:100%;justify-content:center;background:#128c4a;border-color:#128c4a;color:#fff">WhatsApp'tan Sipariş Ver</a>
+      <div id="mesaj"></div>
+      <p style="font-size:.72rem;color:var(--murekkep-yum);margin-top:1rem">
+        Kart bilgileriniz sitemizde saklanmaz; ödeme iyzico'nun 3D Secure sayfasında gerçekleşir.</p>
+    </div>
+  </div>`;
+
+  kok.querySelectorAll("[data-islem]").forEach(b => b.onclick = async () => {
+    const { islem, id, beden } = b.dataset;
+    const mevcut = SLAW.sepetOku().find(k => k.id === id && k.beden === beden);
+    if (islem === "sil") SLAW.sepettenCikar(id, beden);
+    if (islem === "artir") SLAW.adetAyarla(id, beden, mevcut.adet + 1);
+    if (islem === "azalt") mevcut.adet <= 1 ? SLAW.sepettenCikar(id, beden) : SLAW.adetAyarla(id, beden, mevcut.adet - 1);
+    ciz();
+  });
+
+  document.getElementById("wpSiparis").href = await SLAW.whatsappSiparisLinki();
+
+  // kupon
+  let kupon = null;
+  document.getElementById("kuponBtn").onclick = async () => {
+    const kod = document.getElementById("kuponKod").value.trim();
+    const satir = document.getElementById("kuponSatir");
+    if (!kod) return;
+    try {
+      kupon = await SLAW.kuponDogrula(kod, d.araToplam);
+      satir.innerHTML = `<div class="ozet-satir" style="color:#2f9e44"><span>Kupon (${kupon.kod})</span><span>−${SLAW.para(kupon.indirim)}</span></div>`;
+      document.getElementById("toplamTutar").textContent = SLAW.para(d.toplam - kupon.indirim);
+    } catch (e) {
+      kupon = null;
+      satir.innerHTML = '<div class="ozet-satir" style="color:var(--gul);font-size:.78rem"><span>' + e.message + "</span></div>";
+      document.getElementById("toplamTutar").textContent = SLAW.para(d.toplam);
+    }
+  };
+
+  document.getElementById("odeBtn").onclick = async () => {
+    const mesaj = document.getElementById("mesaj");
+    const ad = fAd.value.trim(), tel = fTel.value.trim(), adres = fAdres.value.trim(), sehir = fSehir.value.trim();
+    if (!ad || !tel || !adres || !sehir) { mesaj.innerHTML = '<div class="uyari">Lütfen zorunlu (*) alanları doldurun.</div>'; return; }
+    if (!onaySozlesme.checked) { mesaj.innerHTML = '<div class="uyari">Devam etmek için sözleşmeleri onaylamanız gerekir.</div>'; return; }
+
+    SLAW.pixelOlay("InitiateCheckout", { value: d.toplam, currency: "TRY" });
+    const sb = SLAW.sb();
+    if (!sb) {
+      // demo mod: siparişi yerel olarak kaydet (admin panelinde görünür)
+      const yerel = JSON.parse(localStorage.getItem("slaw_siparisler") || "[]");
+      yerel.unshift({
+        id: "S" + Date.now(), created_at: new Date().toISOString(),
+        ad_soyad: ad, telefon: tel, eposta: fEposta.value.trim(), adres, sehir,
+        tutar: d.toplam - (kupon?.indirim || 0), kargo: d.kargo,
+        kupon_kod: kupon?.kod || null, indirim: kupon?.indirim || 0,
+        durum: "odeme_bekliyor",
+        kalemler: d.satirlar.map(s => ({ id: s.id, ad: s.urun.ad, beden: s.beden, adet: s.adet, birim: s.urun.satisFiyat })),
+      });
+      localStorage.setItem("slaw_siparisler", JSON.stringify(yerel));
+      mesaj.innerHTML = '<div class="uyari">Siparişiniz alındı! Online kart ödemesi çok yakında; şimdilik ödemeyi <b>WhatsApp</b> üzerinden (havale/EFT) tamamlayabilirsiniz. Sipariş bilgileriniz kaydedildi.</div>';
+      return;
+    }
+    // Supabase: siparişi kaydet + iyzico Edge Function ile ödeme başlat
+    try {
+      const kullanici = await SLAW.auth.kullanici();
+      const { data: siparis, error } = await sb.from("siparisler").insert({
+        kullanici_id: kullanici?.id || null, ad_soyad: ad, telefon: tel,
+        eposta: fEposta.value.trim() || null, adres, sehir,
+        tutar: d.toplam - (kupon?.indirim || 0), kargo: d.kargo,
+        kupon_kod: kupon?.kod || null, indirim: kupon?.indirim || 0,
+        durum: "odeme_bekliyor",
+        kalemler: d.satirlar.map(s => ({ id: s.id, ad: s.urun.ad, beden: s.beden, adet: s.adet, birim: s.urun.satisFiyat })),
+      }).select().single();
+      if (error) throw error;
+      const r = await fetch(SLAW.config.supabaseUrl + "/functions/v1/iyzico-odeme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + SLAW.config.supabaseAnonKey },
+        body: JSON.stringify({ siparisId: siparis.id }),
+      });
+      const sonuc = await r.json();
+      if (sonuc.odemeSayfasiUrl) location.href = sonuc.odemeSayfasiUrl;
+      else throw new Error(sonuc.hata || "Ödeme başlatılamadı");
+    } catch (e) {
+      mesaj.innerHTML = '<div class="uyari">Ödeme başlatılamadı: ' + e.message + '. Dilerseniz WhatsApp ile sipariş verebilirsiniz.</div>';
+    }
+  };
+}
+ciz();
+</script>
+</body>
+</html>
