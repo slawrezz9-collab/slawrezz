@@ -172,3 +172,138 @@ create policy "yonetici_oku" on yoneticiler for select using (kullanici_id = aut
 
 -- İlk yöneticiyi eklemek için (kendi user id'nizle, SQL Editor'den):
 -- insert into yoneticiler values ('AUTH-USER-UUID');
+
+
+-- =====================================================================
+-- MIGRATION 001 — sipariş numarası + güvenli sipariş oluşturma
+-- Bu blok idempotenttir; tekrar çalıştırılabilir.
+--
+-- NEDEN: Eskiden istemci siparişi doğrudan INSERT ediyor ve `tutar` alanını
+-- kendisi gönderiyordu. "siparis_olustur" politikası with check (true) olduğu
+-- için anon anahtarla tutar=1 gönderip sepeti 1 TL'ye ödemek mümkündü.
+-- Ayrıca .insert().select() misafirde RLS'e takılıp satır döndürmüyordu
+-- (kullanici_id = auth.uid() → null = null → NULL → false), yani üyeliksiz
+-- alışveriş hiç çalışmıyordu. İkisini de bu RPC çözüyor.
+-- =====================================================================
+
+alter table siparisler add column if not exists siparis_no text;
+alter table siparisler add column if not exists ilce text;
+alter table siparisler add column if not exists teslim_tarihi timestamptz;
+
+create sequence if not exists siparis_no_seq start 1;
+
+-- İstemci ne gönderirse göndersin numarayı sunucu belirler.
+create or replace function siparis_no_ata() returns trigger
+language plpgsql as $$
+begin
+  new.siparis_no := 'SR-' || to_char(now(), 'YYYY') || '-' ||
+                    lpad(nextval('siparis_no_seq')::text, 5, '0');
+  return new;
+end $$;
+
+drop trigger if exists trg_siparis_no on siparisler;
+create trigger trg_siparis_no before insert on siparisler
+  for each row execute function siparis_no_ata();
+
+update siparisler set siparis_no = 'SR-' || to_char(created_at, 'YYYY') || '-' ||
+  lpad(nextval('siparis_no_seq')::text, 5, '0') where siparis_no is null;
+
+create unique index if not exists siparisler_siparis_no_key on siparisler(siparis_no);
+
+-- Siparişi SUNUCUDA oluştur: fiyat, kargo ve kupon indirimi burada hesaplanır.
+-- İstemci yalnızca hangi üründen kaç adet istediğini söyler.
+create or replace function siparis_olustur(
+  p_ad_soyad text, p_telefon text, p_eposta text,
+  p_adres text, p_sehir text, p_ilce text,
+  p_kalemler jsonb,               -- [{id, beden, adet}] — FİYAT YOK
+  p_kupon text default null
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  k jsonb; u urunler%rowtype; ara numeric := 0; kargo numeric := 0;
+  ind numeric := 0; kup kuponlar%rowtype; kalem_liste jsonb := '[]'::jsonb;
+  ayar jsonb; yeni siparisler%rowtype; adet int;
+begin
+  if p_ad_soyad is null or length(trim(p_ad_soyad)) < 3 then
+    raise exception 'ad_gecersiz' using hint = 'Ad soyad en az 3 karakter olmalı.';
+  end if;
+  if regexp_replace(coalesce(p_telefon,''), '\D', '', 'g') !~ '^[0-9]{10,11}$' then
+    raise exception 'telefon_gecersiz' using hint = 'Geçerli bir telefon numarası girin.';
+  end if;
+  if p_adres is null or length(trim(p_adres)) < 10 then
+    raise exception 'adres_gecersiz' using hint = 'Teslimat adresi çok kısa.';
+  end if;
+  if jsonb_array_length(coalesce(p_kalemler,'[]'::jsonb)) = 0 then
+    raise exception 'sepet_bos';
+  end if;
+  if jsonb_array_length(p_kalemler) > 50 then raise exception 'sepet_buyuk'; end if;
+
+  -- Fiyatlar ürün tablosundan okunur; istemcinin gönderdiği fiyat yok sayılır.
+  for k in select * from jsonb_array_elements(p_kalemler) loop
+    select * into u from urunler where id = k->>'id' and aktif;
+    if not found then
+      raise exception 'urun_yok' using hint = 'Sepetinizdeki bir ürün artık satışta değil.';
+    end if;
+    adet := greatest(1, least(20, coalesce((k->>'adet')::int, 1)));
+    ara := ara + u.satis_fiyat * adet;
+    kalem_liste := kalem_liste || jsonb_build_array(jsonb_build_object(
+      'id', u.id, 'ad', u.ad, 'beden', k->>'beden',
+      'adet', adet, 'birim', u.satis_fiyat));
+  end loop;
+
+  -- Kargo: mağaza ayarlarından, yoksa varsayılan (1500 üzeri ücretsiz / 79,90)
+  select deger into ayar from ayarlar where anahtar = 'site';
+  if ara < coalesce((ayar->>'kargoLimit')::numeric, 1500) then
+    kargo := coalesce((ayar->>'kargoUcreti')::numeric, 79.90);
+  end if;
+
+  -- Kupon da sunucuda doğrulanır (istemcideki kuponDogrula ile aynı formül)
+  if p_kupon is not null and length(trim(p_kupon)) > 0 then
+    select * into kup from kuponlar where upper(kod) = upper(trim(p_kupon)) and aktif;
+    if found and ara >= coalesce(kup.min_sepet, 0) then
+      ind := round(case when kup.tip = 'yuzde' then ara * kup.deger / 100
+                        else least(kup.deger, ara) end, 2);
+    end if;
+  end if;
+
+  insert into siparisler (ad_soyad, telefon, eposta, adres, sehir, ilce,
+                          kalemler, tutar, kargo, kupon_kod, indirim,
+                          durum, kullanici_id)
+  values (trim(p_ad_soyad), p_telefon, nullif(trim(coalesce(p_eposta,'')), ''),
+          trim(p_adres), nullif(trim(coalesce(p_sehir,'')), ''),
+          nullif(trim(coalesce(p_ilce,'')), ''),
+          kalem_liste, ara + kargo - ind, kargo,
+          case when ind > 0 then upper(trim(p_kupon)) end, ind,
+          'odeme_bekliyor', auth.uid())
+  returning * into yeni;
+
+  return jsonb_build_object('id', yeni.id, 'siparis_no', yeni.siparis_no,
+                            'tutar', yeni.tutar, 'kargo', yeni.kargo,
+                            'indirim', yeni.indirim, 'araToplam', ara);
+end $$;
+
+grant execute on function siparis_olustur(text,text,text,text,text,text,jsonb,text)
+  to anon, authenticated;
+
+-- Doğrudan INSERT kapatılır; sipariş oluşturmanın tek yolu artık RPC.
+drop policy if exists "siparis_olustur" on siparisler;
+drop policy if exists "siparis_olustur_kapali" on siparisler;
+create policy "siparis_olustur_kapali" on siparisler for insert with check (false);
+
+
+-- FATURA NUMARASI ------------------------------------------------------
+-- Eskiden numara istemcide sayılarak üretiliyordu (hepsi.filter(...).length+1);
+-- iki yönetici aynı anda fatura keserse aynı numarayı alıyordu.
+create sequence if not exists fatura_no_satis_seq start 1;
+create sequence if not exists fatura_no_iade_seq  start 1;
+
+create or replace function fatura_no_al(p_tip text) returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if not yonetici_mi() then raise exception 'yetkisiz'; end if;
+  return case when p_tip = 'iade'
+    then 'SRI-' || to_char(now(),'YYYY') || '-' || lpad(nextval('fatura_no_iade_seq')::text, 4, '0')
+    else 'SR-'  || to_char(now(),'YYYY') || '-' || lpad(nextval('fatura_no_satis_seq')::text, 4, '0')
+  end;
+end $$;
+grant execute on function fatura_no_al(text) to authenticated;

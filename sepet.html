@@ -80,7 +80,8 @@ async function ciz() {
         <div class="form-alan"><label>Telefon *</label><input id="fTel" autocomplete="tel" placeholder="05__ ___ __ __"></div>
         <div class="form-alan"><label>E-posta</label><input id="fEposta" type="email" autocomplete="email"></div>
         <div class="form-alan"><label>Adres *</label><textarea id="fAdres" rows="3"></textarea></div>
-        <div class="form-alan"><label>İl / İlçe *</label><input id="fSehir" placeholder="İstanbul / Kadıköy"></div>
+        <div class="form-alan"><label>İl *</label><input id="fSehir" autocomplete="address-level1" placeholder="İstanbul"></div>
+        <div class="form-alan"><label>İlçe *</label><input id="fIlce" autocomplete="address-level2" placeholder="Kadıköy"></div>
         <div class="onay-satir"><input type="checkbox" id="onaySozlesme">
           <span><a href="hukuk/mesafeli-satis.html" target="_blank" style="text-decoration:underline">Mesafeli Satış Sözleşmesi</a>'ni ve
           <a href="hukuk/kvkk.html" target="_blank" style="text-decoration:underline">KVKK Aydınlatma Metni</a>'ni okudum, kabul ediyorum. *</span></div>
@@ -139,8 +140,9 @@ async function ciz() {
 
   document.getElementById("odeBtn").onclick = async () => {
     const mesaj = document.getElementById("mesaj");
-    const ad = fAd.value.trim(), tel = fTel.value.trim(), adres = fAdres.value.trim(), sehir = fSehir.value.trim();
-    if (!ad || !tel || !adres || !sehir) { mesaj.innerHTML = '<div class="uyari">Lütfen zorunlu (*) alanları doldurun.</div>'; return; }
+    const ad = fAd.value.trim(), tel = fTel.value.trim(), adres = fAdres.value.trim();
+    const sehir = fSehir.value.trim(), ilce = fIlce.value.trim();
+    if (!ad || !tel || !adres || !sehir || !ilce) { mesaj.innerHTML = '<div class="uyari">Lütfen zorunlu (*) alanları doldurun.</div>'; return; }
     if (!onaySozlesme.checked) { mesaj.innerHTML = '<div class="uyari">Devam etmek için sözleşmeleri onaylamanız gerekir.</div>'; return; }
 
     SLAW.pixelOlay("InitiateCheckout", { value: d.toplam, currency: "TRY" });
@@ -148,9 +150,10 @@ async function ciz() {
     if (!sb) {
       // demo mod: siparişi yerel olarak kaydet (admin panelinde görünür)
       const yerel = JSON.parse(localStorage.getItem("slaw_siparisler") || "[]");
+      const siparisNo = SLAW.siparisNoUret();
       yerel.unshift({
-        id: "S" + Date.now(), created_at: new Date().toISOString(),
-        ad_soyad: ad, telefon: tel, eposta: fEposta.value.trim(), adres, sehir,
+        id: "S" + Date.now(), siparis_no: siparisNo, created_at: new Date().toISOString(),
+        ad_soyad: ad, telefon: tel, eposta: fEposta.value.trim(), adres, sehir, ilce,
         tutar: d.toplam - (kupon?.indirim || 0), kargo: d.kargo,
         kupon_kod: kupon?.kod || null, indirim: kupon?.indirim || 0,
         durum: "odeme_bekliyor",
@@ -161,6 +164,7 @@ async function ciz() {
       // ulaşmaz. Bu yüzden siparişin gerçekten iletilmesi WhatsApp adımına bağlı.
       mesaj.innerHTML =
         '<div class="uyari" style="border-color:#f0b429;background:#fff8e6">' +
+        'Sipariş numaranız: <b>' + siparisNo + '</b><br>' +
         '<b>Son bir adım kaldı!</b> Online kart ödemesi henüz açık değil. ' +
         'Siparişinizin bize ulaşması için aşağıdaki butondan <b>WhatsApp</b> ile göndermeniz gerekiyor; ' +
         'ödemeyi havale/EFT ile tamamlıyoruz.<br><br>' +
@@ -168,19 +172,24 @@ async function ciz() {
         (await SLAW.whatsappSiparisLinki()) + '">WhatsApp ile Siparişi Gönder</a></div>';
       return;
     }
-    // Supabase: siparişi kaydet + iyzico Edge Function ile ödeme başlat
+    // Supabase: siparişi SUNUCUDA oluştur (fiyat/kargo/kupon orada hesaplanır),
+    // sonra ödeme Edge Function'ı ile ödeme sayfasına yönlendir.
     try {
-      const kullanici = await SLAW.auth.kullanici();
-      const { data: siparis, error } = await sb.from("siparisler").insert({
-        kullanici_id: kullanici?.id || null, ad_soyad: ad, telefon: tel,
-        eposta: fEposta.value.trim() || null, adres, sehir,
-        tutar: d.toplam - (kupon?.indirim || 0), kargo: d.kargo,
-        kupon_kod: kupon?.kod || null, indirim: kupon?.indirim || 0,
-        durum: "odeme_bekliyor",
-        kalemler: d.satirlar.map(s => ({ id: s.id, ad: s.urun.ad, beden: s.beden, adet: s.adet, birim: s.urun.satisFiyat })),
-      }).select().single();
-      if (error) throw error;
-      const r = await fetch(SLAW.config.supabaseUrl + "/functions/v1/iyzico-odeme", {
+      const { data: siparis, error } = await sb.rpc("siparis_olustur", {
+        p_ad_soyad: ad, p_telefon: tel, p_eposta: fEposta.value.trim() || null,
+        p_adres: adres, p_sehir: sehir, p_ilce: ilce,
+        p_kalemler: d.satirlar.map(s => ({ id: s.id, beden: s.beden, adet: s.adet })),
+        p_kupon: kupon?.kod || null,
+      });
+      if (error) throw new Error(error.hint || error.message);
+      // Sunucu hesabı istemci toplamından farklıysa kullanıcıyı bilgilendir
+      // (fiyat/kupon değişmiş olabilir); ödeme her hâlükârda sunucu tutarı üzerinden.
+      if (Math.abs(+siparis.tutar - (d.toplam - (kupon?.indirim || 0))) > 0.01) {
+        mesaj.innerHTML = '<div class="uyari">Sepetinizdeki fiyatlar güncellendi. ' +
+          'Ödenecek tutar: <b>' + SLAW.para(siparis.tutar) + '</b></div>';
+      }
+      const r = await fetch(SLAW.config.supabaseUrl + "/functions/v1/" +
+                            (SLAW.config.odemeFonksiyonu || "odeme"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + SLAW.config.supabaseAnonKey },
         body: JSON.stringify({ siparisId: siparis.id }),

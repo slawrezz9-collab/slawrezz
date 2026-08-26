@@ -364,6 +364,17 @@
   const durumRengi = (kod, kaynak) =>
     ((kaynak === "iade" ? IADE_DURUMLARI : DURUMLAR)[kod] || {}).renk || "var(--gul)";
 
+  // Demo modda sipariş numarası. Supabase varsa numarayı sunucudaki
+  // trg_siparis_no trigger'ı üretir; bu fonksiyon yalnızca localStorage yolu için.
+  function siparisNoUret() {
+    const yil = new Date().getFullYear();
+    let a = {};
+    try { a = JSON.parse(localStorage.getItem("slaw_siparis_sayac") || "{}"); } catch (e) { a = {}; }
+    a[yil] = (a[yil] || 0) + 1;
+    localStorage.setItem("slaw_siparis_sayac", JSON.stringify(a));
+    return `SR-${yil}-${String(a[yil]).padStart(5, "0")}`;
+  }
+
   // ---------- satıcı künyesi (TEK KAYNAK: config.satici) ----------
   const S = C.satici || {};
   const SATICI_TUREV = {
@@ -501,7 +512,7 @@
     indirimBilgi, grupAnahtari, renkAdi, olayKaydet, olaylariGetir,
     TEMALAR, ayarlariGetir, ayarlarKaydet, ayarlarSifirla, ayarlariUygula,
     DURUMLAR, SIRADAKI, IADE_DURUMLARI, durumHaritasi, durumAdi, durumRengi,
-    satici: S, saticiAlan, saticiyiBas,
+    satici: S, saticiAlan, saticiyiBas, siparisNoUret,
     pixelOlay, sb: () => sb, config: C, KOK,
   };
 })();
