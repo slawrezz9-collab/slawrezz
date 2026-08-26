@@ -157,7 +157,15 @@ async function ciz() {
         kalemler: d.satirlar.map(s => ({ id: s.id, ad: s.urun.ad, beden: s.beden, adet: s.adet, birim: s.urun.satisFiyat })),
       });
       localStorage.setItem("slaw_siparisler", JSON.stringify(yerel));
-      mesaj.innerHTML = '<div class="uyari">Siparişiniz alındı! Online kart ödemesi çok yakında; şimdilik ödemeyi <b>WhatsApp</b> üzerinden (havale/EFT) tamamlayabilirsiniz. Sipariş bilgileriniz kaydedildi.</div>';
+      // ÖNEMLİ: demo modda kayıt yalnızca müşterinin kendi cihazında kalır, satıcıya
+      // ulaşmaz. Bu yüzden siparişin gerçekten iletilmesi WhatsApp adımına bağlı.
+      mesaj.innerHTML =
+        '<div class="uyari" style="border-color:#f0b429;background:#fff8e6">' +
+        '<b>Son bir adım kaldı!</b> Online kart ödemesi henüz açık değil. ' +
+        'Siparişinizin bize ulaşması için aşağıdaki butondan <b>WhatsApp</b> ile göndermeniz gerekiyor; ' +
+        'ödemeyi havale/EFT ile tamamlıyoruz.<br><br>' +
+        '<a class="buton" style="display:inline-block" target="_blank" rel="noopener" href="' +
+        (await SLAW.whatsappSiparisLinki()) + '">WhatsApp ile Siparişi Gönder</a></div>';
       return;
     }
     // Supabase: siparişi kaydet + iyzico Edge Function ile ödeme başlat

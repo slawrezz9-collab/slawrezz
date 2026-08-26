@@ -333,6 +333,83 @@
     return whatsappLinki(m);
   }
 
+  // ---------- sipariş durumları (TEK KAYNAK) ----------
+  // Daha önce bu harita admin panelinde, hesap sayfasında ve schema.sql yorumunda
+  // ayrı ayrı duruyordu ve senkron değildi. Artık tek yer burası.
+  const DURUMLAR = {
+    odeme_bekliyor: { admin: "Ödeme Bekliyor", musteri: "Ödeme Bekleniyor",  renk: "#b3a795", adim: 0 },
+    odendi:         { admin: "Yeni",           musteri: "Siparişiniz Alındı", renk: "#2f9e44", adim: 1 },
+    hazirlaniyor:   { admin: "Hazırlanıyor",   musteri: "Hazırlanıyor",       renk: "#f0b429", adim: 2 },
+    kargoda:        { admin: "Kargoda",        musteri: "Kargoya Verildi",    renk: "#1971c2", adim: 3 },
+    teslim:         { admin: "Teslim Edilen",  musteri: "Teslim Edildi",      renk: "#2f9e44", adim: 4 },
+    iade:           { admin: "İade",           musteri: "İade Edildi",        renk: "#a33",    adim: -1 },
+    iptal:          { admin: "İptal",          musteri: "İptal Edildi",       renk: "#888",    adim: -1 },
+  };
+  const SIRADAKI = { odendi: "hazirlaniyor", hazirlaniyor: "kargoda", kargoda: "teslim" };
+
+  const IADE_DURUMLARI = {
+    talep_edildi: { admin: "Talep Edildi", musteri: "Talebiniz Alındı",          renk: "#f0b429" },
+    onaylandi:    { admin: "Onaylandı",    musteri: "Onaylandı — Kargoya Verin", renk: "#1971c2" },
+    reddedildi:   { admin: "Reddedildi",   musteri: "Reddedildi",                renk: "#a33" },
+    kargoda:      { admin: "Yolda",        musteri: "Ürün Bize Doğru Yolda",     renk: "#1971c2" },
+    tamamlandi:   { admin: "Tamamlandı",   musteri: "İadeniz Tamamlandı",        renk: "#2f9e44" },
+  };
+
+  // Düz {kod: ad} haritası döndürür — mevcut kodun DURUMLAR[s.durum] kullanımı bozulmasın diye.
+  function durumHaritasi(kim, kaynak) {
+    const k = kaynak === "iade" ? IADE_DURUMLARI : DURUMLAR;
+    return Object.fromEntries(Object.entries(k).map(([kod, v]) => [kod, v[kim] || v.admin]));
+  }
+  const durumAdi = (kod, kim, kaynak) => durumHaritasi(kim || "musteri", kaynak)[kod] || kod;
+  const durumRengi = (kod, kaynak) =>
+    ((kaynak === "iade" ? IADE_DURUMLARI : DURUMLAR)[kod] || {}).renk || "var(--gul)";
+
+  // ---------- satıcı künyesi (TEK KAYNAK: config.satici) ----------
+  const S = C.satici || {};
+  const SATICI_TUREV = {
+    tamAdres: () => [S.adres, S.ilce, S.il].filter(Boolean).join(" / "),
+    vergiSatiri: () => [
+      S.vergiDairesi && S.vergiDairesi + " V.D.",
+      S.vergiNo && "VKN/TCKN: " + S.vergiNo,
+    ].filter(Boolean).join(" — "),
+    kunye: () => [S.unvan, SATICI_TUREV.tamAdres(), SATICI_TUREV.vergiSatiri(),
+                  S.telefon, S.eposta].filter(Boolean).join(", "),
+  };
+  function saticiAlan(yol) {
+    if (SATICI_TUREV[yol]) return SATICI_TUREV[yol]();
+    return String(yol).split(".").reduce((o, k) => (o == null ? o : o[k]), S);
+  }
+  // data-yil deseninin kardeşi: <span data-satici="unvan"></span> doldurur.
+  function saticiyiBas(kapsam) {
+    const k = kapsam || document;
+    // değer boşsa bloğu tamamen kaldır (MERSİS gibi opsiyonel alanlar için)
+    k.querySelectorAll("[data-satici-varsa]").forEach((e) => {
+      if (!saticiAlan(e.dataset.saticiVarsa)) e.remove();
+    });
+    k.querySelectorAll("[data-satici]").forEach((e) => {
+      const v = saticiAlan(e.dataset.satici);
+      e.textContent = v || "[EKLENECEK]";
+      if (e.hasAttribute("data-satici-mailto") && v) e.href = "mailto:" + v;
+      if (e.hasAttribute("data-satici-tel") && v) e.href = "tel:" + String(v).replace(/\D/g, "");
+    });
+    // ödeme sağlayıcı etiketi (hukuk metinlerinde geçiyor)
+    const etiket = C.odemeSaglayici === "paytr" ? "PayTR" : "iyzico";
+    k.querySelectorAll("[data-odeme-saglayici]").forEach((e) => (e.textContent = etiket));
+  }
+  // ETBİS kayıt rozeti — numara girilmemişse hiç render edilmez.
+  function etbisRozeti() {
+    if (!S.etbisNo) return;
+    document.querySelectorAll("footer .telif").forEach((t) => {
+      const s = document.createElement("span");
+      s.className = "etbis-rozet";
+      s.innerHTML = S.etbisQr
+        ? `<a href="${S.etbisUrl || "#"}" target="_blank" rel="noopener">
+             <img src="${KOK + S.etbisQr}" alt="ETBİS Kayıtlı E-Ticaret Sitesi" style="height:44px;vertical-align:middle"></a>`
+        : `ETBİS Kayıt No: ${S.etbisNo}`;
+      t.appendChild(s);
+    });
+  }
+
   // ---------- üyelik ----------
   const auth = {
     aktif: () => !!sb,
@@ -411,6 +488,8 @@
     ayarlariUygula();
     mobilMenuKur();
     document.querySelectorAll("[data-yil]").forEach((e) => (e.textContent = new Date().getFullYear()));
+    saticiyiBas();
+    etbisRozeti();
   });
 
   window.SLAW = {
@@ -421,6 +500,8 @@
     kuponlariGetir, kuponDogrula, kuponKaydet, kuponSil,
     indirimBilgi, grupAnahtari, renkAdi, olayKaydet, olaylariGetir,
     TEMALAR, ayarlariGetir, ayarlarKaydet, ayarlarSifirla, ayarlariUygula,
+    DURUMLAR, SIRADAKI, IADE_DURUMLARI, durumHaritasi, durumAdi, durumRengi,
+    satici: S, saticiAlan, saticiyiBas,
     pixelOlay, sb: () => sb, config: C, KOK,
   };
 })();

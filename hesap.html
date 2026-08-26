@@ -93,7 +93,7 @@
     const sb = SLAW.sb();
     const { data: siparisler } = await sb.from("siparisler")
       .select("*").eq("kullanici_id", k.id).order("created_at", { ascending: false });
-    const durumlar = { odeme_bekliyor: "Ödeme Bekliyor", odendi: "Ödendi", kargoda: "Kargoda", teslim: "Teslim Edildi", iptal: "İptal" };
+    const durumlar = SLAW.durumHaritasi("musteri");
     kok.innerHTML = `
       <div class="bolum-baslik"><h2>Merhaba, <em>${k.user_metadata?.ad || k.email}</em></h2>
         <button class="buton ikincil" id="cikisBtn">Çıkış Yap</button></div>
