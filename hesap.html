@@ -39,11 +39,33 @@
 (async function () {
   const kok = document.getElementById("icerik");
 
+  // Ödeme dönüşü bilgilendirmesi — üyelik kontrolünden ÖNCE çalışmalı, yoksa
+  // Supabase kapalıyken müşteri ödeme sonrası hiçbir mesaj görmez.
+  const qp = new URLSearchParams(location.search);
+  if (qp.get("odeme")) {
+    const basarili = qp.get("odeme") === "basarili";
+    const b = document.createElement("div");
+    b.className = "uyari";
+    b.style.cssText = "max-width:640px;margin:0 auto 1.4rem;" +
+      (basarili ? "border-color:#2f9e44;background:#e7f5ec" : "");
+    b.innerHTML = basarili
+      ? "<b>Ödemeniz alındı!</b> Siparişiniz" +
+        (qp.get("no") ? " <b>" + qp.get("no").replace(/[<>&"]/g, "") + "</b> numarasıyla" : "") +
+        " hazırlanmaya başlanacak."
+      : 'Ödeme tamamlanamadı. Sepetiniz duruyor; <a href="sepet.html" style="text-decoration:underline">tekrar deneyebilir</a> ' +
+        "veya WhatsApp'tan sipariş verebilirsiniz.";
+    kok.before(b);
+    history.replaceState({}, "", location.pathname);
+  }
+
   if (!SLAW.auth.aktif()) {
     kok.innerHTML = `<div class="bos-durum">
       <div class="buyuk-harf">Üyelik çok yakında</div>
-      <p>Üyelik sistemi kuruluyor. Şimdilik siparişlerinizi üyeliksiz veya WhatsApp'tan verebilirsiniz.</p><br>
-      <a class="buton" href="index.html#koleksiyon">Alışverişe Devam</a></div>`;
+      <p>Üyelik sistemi kuruluyor. Şimdilik siparişlerinizi üyeliksiz verebilir,
+        <a href="siparis-takip.html" style="text-decoration:underline">sipariş takip sayfasından</a>
+        durumunu izleyip iade talebi oluşturabilirsiniz.</p><br>
+      <a class="buton" href="index.html#koleksiyon">Alışverişe Devam</a>
+      <a class="buton ikincil" href="siparis-takip.html">Sipariş Takip</a></div>`;
     return;
   }
 

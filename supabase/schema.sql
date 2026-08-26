@@ -494,3 +494,23 @@ begin
                             'siparis_no', s.siparis_no, 'kalemler', t.kalemler);
 end $fn$;
 grant execute on function iade_talebi_ac(text, text, text, text, text, jsonb) to anon, authenticated;
+
+
+-- =====================================================================
+-- MIGRATION 004 — sağlayıcı bağımsız ödeme alanları
+-- iyzico_token korunuyor (eski kayıtlar ve eski fonksiyon için); yeni akış
+-- odeme_saglayici + odeme_referans kullanır.
+-- =====================================================================
+alter table siparisler add column if not exists odeme_saglayici text;
+alter table siparisler add column if not exists odeme_referans text;
+alter table siparisler add column if not exists odeme_durum text;   -- basladi|basarili|basarisiz|tutar_uyusmadi
+alter table siparisler add column if not exists odeme_ham jsonb;
+create index if not exists siparisler_odeme_referans_idx on siparisler(odeme_referans);
+
+update siparisler
+   set odeme_saglayici = coalesce(odeme_saglayici, 'iyzico'),
+       odeme_referans  = coalesce(odeme_referans, iyzico_token)
+ where iyzico_token is not null;
+
+-- iyzico_token iki hafta stabil çalıştıktan sonra kaldırılabilir:
+--   alter table siparisler drop column iyzico_token;
