@@ -364,6 +364,31 @@
   const durumRengi = (kod, kaynak) =>
     ((kaynak === "iade" ? IADE_DURUMLARI : DURUMLAR)[kod] || {}).renk || "var(--gul)";
 
+  // ---------- kargo firmaları ----------
+  // Hem doğrudan kargo anlaşması hem toplu gönderi platformları desteklenir.
+  // toplu:true olanlar birden çok kargo firmasını tek panelden yönetir.
+  const KARGO_FIRMALARI = {
+    yurtici:     { ad: "Yurtiçi Kargo", takip: "https://www.yurticikargo.com/tr/online-servisler/gonderi-sorgula?code={no}" },
+    aras:        { ad: "Aras Kargo",    takip: "https://kargotakip.araskargo.com.tr/mainpage.aspx?code={no}" },
+    mng:         { ad: "MNG Kargo",     takip: "https://kargotakip.mngkargo.com.tr/?takipNo={no}" },
+    surat:       { ad: "Sürat Kargo",   takip: "https://www.suratkargo.com.tr/KargoTakip/?kargotakipno={no}" },
+    ptt:         { ad: "PTT Kargo",     takip: "https://gonderitakip.ptt.gov.tr/Track/Verify?q={no}" },
+    hepsijet:    { ad: "Hepsijet",      takip: "https://www.hepsijet.com/gonderi-takibi?trackingNumber={no}" },
+    sendeo:      { ad: "Sendeo",        takip: "https://sendeo.com.tr/gonderi-takip?kod={no}" },
+    kolaygelsin: { ad: "Kolay Gelsin",  takip: "https://kolaygelsin.com/gonderi-takibi?code={no}", toplu: true },
+    basitkargo:  { ad: "Basit Kargo",   takip: "https://app.basitkargo.com/takip/{no}", toplu: true },
+    diger:       { ad: "Diğer",         takip: "" },
+  };
+  // Kargo firmalarının takip adresleri zaman zaman değişir; admin > Mağaza
+  // ayarlarından şablon override edilebilsin diye ayarlara da bakıyoruz.
+  function kargoTakipLinki(firma, no) {
+    if (!no) return null;
+    const ozel = (_ayarlar && _ayarlar.kargoTakipSablon) || {};
+    const sablon = ozel[firma] || (KARGO_FIRMALARI[firma] || {}).takip;
+    return sablon ? sablon.replace("{no}", encodeURIComponent(String(no).trim())) : null;
+  }
+  const kargoFirmaAdi = (k) => (KARGO_FIRMALARI[k] || {}).ad || k || "";
+
   // Demo modda sipariş numarası. Supabase varsa numarayı sunucudaki
   // trg_siparis_no trigger'ı üretir; bu fonksiyon yalnızca localStorage yolu için.
   function siparisNoUret() {
@@ -383,8 +408,11 @@
       S.vergiDairesi && S.vergiDairesi + " V.D.",
       S.vergiNo && "VKN/TCKN: " + S.vergiNo,
     ].filter(Boolean).join(" — "),
-    kunye: () => [S.unvan, SATICI_TUREV.tamAdres(), SATICI_TUREV.vergiSatiri(),
-                  S.telefon, S.eposta].filter(Boolean).join(", "),
+    // Unvan yoksa künye anlamsız olur ("SLAW REZZ (0541 ...)" gibi) —
+    // bu durumda boş dönüp sayfada [EKLENECEK] gösterilmesini sağlıyoruz.
+    kunye: () => !S.unvan ? "" :
+      [S.unvan, SATICI_TUREV.tamAdres(), SATICI_TUREV.vergiSatiri(),
+       S.telefon, S.eposta].filter(Boolean).join(", "),
   };
   function saticiAlan(yol) {
     if (SATICI_TUREV[yol]) return SATICI_TUREV[yol]();
@@ -513,6 +541,7 @@
     TEMALAR, ayarlariGetir, ayarlarKaydet, ayarlarSifirla, ayarlariUygula,
     DURUMLAR, SIRADAKI, IADE_DURUMLARI, durumHaritasi, durumAdi, durumRengi,
     satici: S, saticiAlan, saticiyiBas, siparisNoUret,
+    KARGO_FIRMALARI, kargoTakipLinki, kargoFirmaAdi,
     pixelOlay, sb: () => sb, config: C, KOK,
   };
 })();

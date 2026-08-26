@@ -307,3 +307,12 @@ begin
   end;
 end $$;
 grant execute on function fatura_no_al(text) to authenticated;
+
+
+-- =====================================================================
+-- MIGRATION 002 — kargo alanları
+-- =====================================================================
+alter table siparisler add column if not exists kargo_firma text;
+alter table siparisler add column if not exists kargo_verildi timestamptz;
+alter table siparisler add column if not exists desi numeric(6,2);
+create index if not exists siparisler_durum_idx on siparisler(durum, created_at desc);

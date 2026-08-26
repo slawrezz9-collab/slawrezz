@@ -101,11 +101,19 @@
       ${(siparisler || []).length ? siparisler.map(s => `
         <div class="siparis-kart">
           <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
-            <b>${new Date(s.created_at).toLocaleDateString("tr-TR")}</b>
-            <span class="durum-etiket">${durumlar[s.durum] || s.durum}</span>
+            <b>${s.siparis_no || "#" + String(s.id).slice(0, 8)}</b>
+            <span class="durum-etiket" style="background:${SLAW.durumRengi(s.durum)}22;color:${SLAW.durumRengi(s.durum)}">${durumlar[s.durum] || s.durum}</span>
           </div>
+          <div style="font-size:.78rem;color:var(--murekkep-yum)">${new Date(s.created_at).toLocaleDateString("tr-TR")}</div>
           <div style="font-size:.85rem;color:var(--murekkep-yum);margin:.5rem 0">
             ${(s.kalemler || []).map(x => `${x.ad} (${x.beden} × ${x.adet})`).join(" · ")}</div>
+          ${s.kargo_takip ? `<div style="font-size:.82rem;margin-bottom:.4rem">
+            ${SLAW.kargoFirmaAdi(s.kargo_firma) || "Kargo"}:
+            ${SLAW.kargoTakipLinki(s.kargo_firma, s.kargo_takip)
+              ? `<a href="${SLAW.kargoTakipLinki(s.kargo_firma, s.kargo_takip)}" target="_blank" rel="noopener"
+                    style="text-decoration:underline;color:var(--gul)">${s.kargo_takip} ↗</a>`
+              : `<b>${s.kargo_takip}</b>`}
+          </div>` : ""}
           <div class="kart-fiyat">${SLAW.para(s.tutar)}</div>
         </div>`).join("") : "<p style='color:var(--murekkep-yum)'>Henüz siparişiniz yok.</p>"}`;
     document.getElementById("cikisBtn").onclick = async () => { await SLAW.auth.cikis(); location.reload(); };
