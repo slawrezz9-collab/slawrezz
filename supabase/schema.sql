@@ -316,3 +316,181 @@ alter table siparisler add column if not exists kargo_firma text;
 alter table siparisler add column if not exists kargo_verildi timestamptz;
 alter table siparisler add column if not exists desi numeric(6,2);
 create index if not exists siparisler_durum_idx on siparisler(durum, created_at desc);
+
+
+-- =====================================================================
+-- MIGRATION 003 — iade talepleri + misafir sipariş sorgulama
+-- =====================================================================
+
+create table if not exists iade_talepleri (
+  id uuid primary key default gen_random_uuid(),
+  siparis_id uuid not null references siparisler(id) on delete cascade,
+  kullanici_id uuid references auth.users(id),
+  tip text not null default 'iade',       -- iade | degisim
+  sebep text not null,                    -- beden|kusurlu|urun_farkli|gec_teslim|vazgectim|diger
+  aciklama text,
+  kalemler jsonb not null default '[]',   -- kısmi iade: [{id, ad, beden, adet, birim}]
+  tutar numeric(10,2) default 0,
+  durum text not null default 'talep_edildi',
+  yonetici_notu text,
+  kargo_firma text,
+  kargo_kodu text,                        -- satıcının verdiği anlaşmalı gönderi kodu
+  kargo_takip text,                       -- müşterinin geri gönderim takip no
+  created_at timestamptz default now(),
+  guncellendi timestamptz default now()
+);
+create index if not exists iade_siparis_idx on iade_talepleri(siparis_id);
+create index if not exists iade_durum_idx on iade_talepleri(durum, created_at desc);
+
+alter table iade_talepleri enable row level security;
+drop policy if exists "iade_oku" on iade_talepleri;
+create policy "iade_oku" on iade_talepleri for select
+  using (kullanici_id = auth.uid() or yonetici_mi());
+drop policy if exists "iade_yonet" on iade_talepleri;
+create policy "iade_yonet" on iade_talepleri for update using (yonetici_mi());
+drop policy if exists "iade_sil" on iade_talepleri;
+create policy "iade_sil" on iade_talepleri for delete using (yonetici_mi());
+-- Müşteri tarafında talep açmanın tek yolu iade_talebi_ac RPC'si (doğrulama
+-- orada yapılır). Yönetici, telefonla gelen talepleri panelden girebilsin diye
+-- doğrudan ekleyebilir.
+drop policy if exists "iade_ac_kapali" on iade_talepleri;
+drop policy if exists "iade_ac_yonetici" on iade_talepleri;
+create policy "iade_ac_yonetici" on iade_talepleri for insert with check (yonetici_mi());
+
+
+-- KABA KUVVET KORUMASI -------------------------------------------------
+-- Sipariş numarası tahmin edilebilir (SR-2026-00001, 00002...) ve tek sır
+-- telefonun son 4 hanesi = 10.000 olasılık. Sadece gecikme yetmez, çünkü
+-- paralel denenebilir. Bu yüzden sipariş numarası başına deneme kilidi var:
+-- 15 dakikada 8 deneme  ->  10.000 olasılık için ~13 gün kesintisiz saldırı.
+create table if not exists sorgu_denemeleri (
+  anahtar text primary key,
+  sayac int not null default 0,
+  pencere_bas timestamptz not null default now()
+);
+alter table sorgu_denemeleri enable row level security;  -- policy yok = yalnız definer erişir
+
+create or replace function _sorgu_izin(p_anahtar text) returns boolean
+language plpgsql security definer set search_path = public as $fn$
+declare d sorgu_denemeleri%rowtype;
+begin
+  insert into sorgu_denemeleri(anahtar) values (p_anahtar) on conflict (anahtar) do nothing;
+  select * into d from sorgu_denemeleri where anahtar = p_anahtar for update;
+  if now() - d.pencere_bas > interval '15 minutes' then
+    update sorgu_denemeleri set sayac = 1, pencere_bas = now() where anahtar = p_anahtar;
+    return true;
+  end if;
+  if d.sayac >= 8 then return false; end if;
+  update sorgu_denemeleri set sayac = sayac + 1 where anahtar = p_anahtar;
+  return true;
+end $fn$;
+revoke execute on function _sorgu_izin(text) from anon, authenticated;
+
+-- Misafir sipariş sorgulama. RLS anonim kullanıcının siparisler tablosunu
+-- okumasını tamamen engellediği için tek yol bu security definer RPC.
+-- KİŞİSEL VERİ MASKELENİR: tam adres, tam telefon ve e-posta asla dönmez.
+create or replace function siparis_sorgula(p_siparis_no text, p_tel_son4 text)
+returns jsonb
+language plpgsql security definer set search_path = public as $fn$
+declare s siparisler%rowtype; no text;
+begin
+  no := upper(trim(coalesce(p_siparis_no, '')));
+  if no = '' or coalesce(p_tel_son4, '') !~ '^[0-9]{4}$' then return null; end if;
+  if not _sorgu_izin(no) then return jsonb_build_object('kilit', true); end if;
+  perform pg_sleep(0.4);   -- zamanlama saldırısını ve hızlı denemeyi yavaşlatır
+
+  select * into s from siparisler
+   where siparis_no = no
+     and right(regexp_replace(telefon, '\D', '', 'g'), 4) = p_tel_son4;
+  if not found then return null; end if;
+
+  update sorgu_denemeleri set sayac = 0 where anahtar = no;   -- doğru sorguda kilidi sıfırla
+
+  return jsonb_build_object(
+    'id', s.id, 'siparis_no', s.siparis_no, 'created_at', s.created_at,
+    'teslim_tarihi', s.teslim_tarihi, 'kargo_verildi', s.kargo_verildi,
+    'durum', s.durum, 'kargo_firma', s.kargo_firma, 'kargo_takip', s.kargo_takip,
+    'tutar', s.tutar, 'kargo', s.kargo, 'indirim', s.indirim, 'kalemler', s.kalemler,
+    'ad', split_part(s.ad_soyad, ' ', 1) || ' ' ||
+          left(coalesce(nullif(split_part(s.ad_soyad, ' ', 2), ''), '-'), 1) || '.',
+    'sehir', s.sehir, 'ilce', s.ilce,
+    'adres_maske', left(coalesce(s.adres, ''), 10) || '...',
+    'telefon_maske', '0*** *** ' || p_tel_son4,
+    'iadeler', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', i.id, 'durum', i.durum, 'tip', i.tip, 'sebep', i.sebep,
+        'tutar', i.tutar, 'kalemler', i.kalemler, 'created_at', i.created_at,
+        'kargo_kodu', i.kargo_kodu, 'kargo_firma', i.kargo_firma,
+        'yonetici_notu', i.yonetici_notu))
+      from iade_talepleri i where i.siparis_id = s.id), '[]'::jsonb)
+  );
+end $fn$;
+grant execute on function siparis_sorgula(text, text) to anon, authenticated;
+
+-- İade/değişim talebi aç. Tutar ve kalemler SUNUCUDA doğrulanır; istemcinin
+-- gönderdiği fiyat yok sayılır, sadece siparişte gerçekten olan kalemler seçilebilir.
+-- p_tel_son4 null gelirse üye kendi siparişi üzerinden talep açıyordur.
+create or replace function iade_talebi_ac(
+  p_siparis_no text, p_tel_son4 text,
+  p_tip text, p_sebep text, p_aciklama text, p_kalemler jsonb
+) returns jsonb
+language plpgsql security definer set search_path = public as $fn$
+declare s siparisler%rowtype; t iade_talepleri%rowtype;
+        no text; tut numeric := 0; k jsonb; ref jsonb;
+        kalem_ok jsonb := '[]'::jsonb; adet int;
+begin
+  no := upper(trim(coalesce(p_siparis_no, '')));
+  if p_tip not in ('iade', 'degisim') then raise exception 'tip_gecersiz'; end if;
+  if p_sebep not in ('beden', 'kusurlu', 'urun_farkli', 'gec_teslim', 'vazgectim', 'diger')
+    then raise exception 'sebep_gecersiz'; end if;
+
+  if p_tel_son4 is null then
+    if auth.uid() is null then raise exception 'dogrulama'; end if;
+    select * into s from siparisler where siparis_no = no and kullanici_id = auth.uid();
+  else
+    if p_tel_son4 !~ '^[0-9]{4}$' then raise exception 'dogrulama'; end if;
+    if not _sorgu_izin(no) then raise exception 'cok_deneme'; end if;
+    select * into s from siparisler
+     where siparis_no = no
+       and right(regexp_replace(telefon, '\D', '', 'g'), 4) = p_tel_son4;
+  end if;
+  if not found then raise exception 'siparis_yok'; end if;
+
+  if s.durum not in ('kargoda', 'teslim') then
+    raise exception 'durum_uygun_degil'
+      using hint = 'Bu sipariş için henüz iade talebi açılamaz.';
+  end if;
+  -- Cayma süresi: yasal 14 gün, sitede 15 güne kadar destek vaat ediliyor.
+  if coalesce(s.teslim_tarihi, s.kargo_verildi, s.created_at) < now() - interval '15 days' then
+    raise exception 'sure_doldu' using hint = 'İade süresi (15 gün) dolmuş.';
+  end if;
+  if exists (select 1 from iade_talepleri i where i.siparis_id = s.id
+             and i.durum in ('talep_edildi', 'onaylandi', 'kargoda')) then
+    raise exception 'acik_talep_var' using hint = 'Bu sipariş için zaten açık bir talebiniz var.';
+  end if;
+
+  for k in select * from jsonb_array_elements(coalesce(p_kalemler, '[]'::jsonb)) loop
+    select value into ref from jsonb_array_elements(s.kalemler) value
+     where value->>'id' = k->>'id'
+       and coalesce(value->>'beden', '') = coalesce(k->>'beden', '') limit 1;
+    if ref is null then raise exception 'kalem_gecersiz'; end if;
+    adet := least(greatest(coalesce((k->>'adet')::int, 0), 0), (ref->>'adet')::int);
+    if adet > 0 then
+      tut := tut + (ref->>'birim')::numeric * adet;
+      kalem_ok := kalem_ok || jsonb_build_array(jsonb_build_object(
+        'id', ref->>'id', 'ad', ref->>'ad', 'beden', ref->>'beden',
+        'adet', adet, 'birim', (ref->>'birim')::numeric));
+    end if;
+  end loop;
+  if jsonb_array_length(kalem_ok) = 0 then
+    raise exception 'kalem_secilmedi' using hint = 'En az bir ürün seçmelisiniz.';
+  end if;
+
+  insert into iade_talepleri (siparis_id, kullanici_id, tip, sebep, aciklama, kalemler, tutar)
+  values (s.id, s.kullanici_id, p_tip, p_sebep,
+          nullif(left(coalesce(p_aciklama, ''), 1000), ''), kalem_ok, tut)
+  returning * into t;
+
+  return jsonb_build_object('id', t.id, 'durum', t.durum, 'tutar', t.tutar,
+                            'siparis_no', s.siparis_no, 'kalemler', t.kalemler);
+end $fn$;
+grant execute on function iade_talebi_ac(text, text, text, text, text, jsonb) to anon, authenticated;

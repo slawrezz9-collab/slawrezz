@@ -91,8 +91,10 @@
 
   async function profilGoster(k) {
     const sb = SLAW.sb();
-    const { data: siparisler } = await sb.from("siparisler")
-      .select("*").eq("kullanici_id", k.id).order("created_at", { ascending: false });
+    const [{ data: siparisler }, iadeler] = await Promise.all([
+      sb.from("siparisler").select("*").eq("kullanici_id", k.id).order("created_at", { ascending: false }),
+      SLAW.iadeTalepleriGetir({ kullanici_id: k.id }),
+    ]);
     const durumlar = SLAW.durumHaritasi("musteri");
     kok.innerHTML = `
       <div class="bolum-baslik"><h2>Merhaba, <em>${k.user_metadata?.ad || k.email}</em></h2>
@@ -114,7 +116,20 @@
                     style="text-decoration:underline;color:var(--gul)">${s.kargo_takip} ↗</a>`
               : `<b>${s.kargo_takip}</b>`}
           </div>` : ""}
-          <div class="kart-fiyat">${SLAW.para(s.tutar)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap">
+            <div class="kart-fiyat">${SLAW.para(s.tutar)}</div>
+            ${(() => {
+              const acik = (iadeler || []).find(i => String(i.siparis_id) === String(s.id) &&
+                ["talep_edildi", "onaylandi", "kargoda"].includes(i.durum));
+              if (acik) {
+                const r = SLAW.durumRengi(acik.durum, "iade");
+                return `<span class="durum-etiket" style="background:${r}22;color:${r}">İade: ${SLAW.durumAdi(acik.durum, "musteri", "iade")}</span>`;
+              }
+              return SLAW.iadeEdilebilirMi(s)
+                ? `<a class="buton ikincil" style="font-size:.72rem;padding:.5rem 1rem" href="siparis-takip.html?no=${encodeURIComponent(s.siparis_no || "")}">İade / Değişim Talebi</a>`
+                : "";
+            })()}
+          </div>
         </div>`).join("") : "<p style='color:var(--murekkep-yum)'>Henüz siparişiniz yok.</p>"}`;
     document.getElementById("cikisBtn").onclick = async () => { await SLAW.auth.cikis(); location.reload(); };
   }

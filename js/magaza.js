@@ -364,6 +364,112 @@
   const durumRengi = (kod, kaynak) =>
     ((kaynak === "iade" ? IADE_DURUMLARI : DURUMLAR)[kod] || {}).renk || "var(--gul)";
 
+  // ---------- sipariş sorgulama & iade talepleri ----------
+  const IADE_SEBEPLERI = {
+    beden: "Beden uymadı",
+    kusurlu: "Ürün kusurlu / hasarlı geldi",
+    urun_farkli: "Sipariş ettiğimden farklı ürün geldi",
+    gec_teslim: "Çok geç teslim edildi",
+    vazgectim: "Vazgeçtim (cayma hakkı)",
+    diger: "Diğer",
+  };
+
+  // Misafir sorgulaması: sipariş no + telefonun son 4 hanesi.
+  // Supabase'de RLS anonim okumayı engellediği için security definer RPC kullanılır.
+  async function siparisSorgula(siparisNo, telSon4) {
+    const no = String(siparisNo || "").trim().toUpperCase();
+    const son4 = String(telSon4 || "").trim();
+    if (!no || !/^[0-9]{4}$/.test(son4)) return null;
+    if (sb) {
+      const { data, error } = await sb.rpc("siparis_sorgula",
+        { p_siparis_no: no, p_tel_son4: son4 });
+      if (error) throw error;
+      if (data && data.kilit) throw new Error("cok_deneme");
+      return data || null;
+    }
+    // demo mod: yalnızca bu tarayıcıda verilen siparişler bulunabilir
+    const s = JSON.parse(localStorage.getItem("slaw_siparisler") || "[]").find(
+      (x) => String(x.siparis_no || "").toUpperCase() === no &&
+             String(x.telefon || "").replace(/\D/g, "").slice(-4) === son4);
+    if (!s) return null;
+    const adParcalari = String(s.ad_soyad || "").trim().split(/\s+/);
+    return {
+      ...s,
+      ad: adParcalari[0] + " " + (adParcalari[1] || "-").charAt(0) + ".",
+      adres_maske: String(s.adres || "").slice(0, 10) + "...",
+      telefon_maske: "0*** *** " + son4,
+      iadeler: await iadeTalepleriGetir({ siparis_id: s.id }),
+    };
+  }
+
+  // filtre: {siparis_id} | {kullanici_id} | yok (yönetici: hepsi)
+  async function iadeTalepleriGetir(filtre) {
+    if (sb) {
+      let q = sb.from("iade_talepleri").select("*").order("created_at", { ascending: false });
+      if (filtre && filtre.siparis_id) q = q.eq("siparis_id", filtre.siparis_id);
+      if (filtre && filtre.kullanici_id) q = q.eq("kullanici_id", filtre.kullanici_id);
+      const { data } = await q;
+      return data || [];
+    }
+    const hepsi = JSON.parse(localStorage.getItem("slaw_iadeler") || "[]");
+    return filtre && filtre.siparis_id
+      ? hepsi.filter((i) => String(i.siparis_id) === String(filtre.siparis_id))
+      : hepsi;
+  }
+
+  // talep: {siparis_no, tel_son4, siparis_id, tip, sebep, aciklama, kalemler}
+  // tel_son4 null ise üye kendi siparişi üzerinden açıyordur.
+  async function iadeTalebiAc(talep) {
+    if (sb) {
+      const { data, error } = await sb.rpc("iade_talebi_ac", {
+        p_siparis_no: talep.siparis_no,
+        p_tel_son4: talep.tel_son4 || null,
+        p_tip: talep.tip || "iade",
+        p_sebep: talep.sebep,
+        p_aciklama: talep.aciklama || "",
+        p_kalemler: talep.kalemler || [],
+      });
+      if (error) throw new Error(error.hint || error.message);
+      return data;
+    }
+    // demo mod: sunucu doğrulamalarının hafif bir kopyası
+    const hepsi = JSON.parse(localStorage.getItem("slaw_iadeler") || "[]");
+    if (hepsi.some((i) => String(i.siparis_id) === String(talep.siparis_id) &&
+        ["talep_edildi", "onaylandi", "kargoda"].includes(i.durum)))
+      throw new Error("Bu sipariş için zaten açık bir talebiniz var.");
+    const kalemler = (talep.kalemler || []).filter((k) => k.adet > 0);
+    if (!kalemler.length) throw new Error("En az bir ürün seçmelisiniz.");
+    const yeni = {
+      id: "I" + Date.now(), siparis_id: talep.siparis_id,
+      siparis_no: talep.siparis_no, tip: talep.tip || "iade",
+      sebep: talep.sebep, aciklama: talep.aciklama || "", kalemler,
+      tutar: kalemler.reduce((t, k) => t + (k.birim || 0) * k.adet, 0),
+      durum: "talep_edildi", created_at: new Date().toISOString(),
+    };
+    hepsi.unshift(yeni);
+    localStorage.setItem("slaw_iadeler", JSON.stringify(hepsi));
+    return yeni;
+  }
+
+  async function iadeTalebiGuncelle(id, alanlar) {
+    const ek = Object.assign({}, alanlar, { guncellendi: new Date().toISOString() });
+    if (sb) {
+      const { error } = await sb.from("iade_talepleri").update(ek).eq("id", id);
+      if (error) { alert("İade talebi güncellenemedi: " + error.message); throw error; }
+    } else {
+      const l = JSON.parse(localStorage.getItem("slaw_iadeler") || "[]");
+      Object.assign(l.find((i) => String(i.id) === String(id)) || {}, ek);
+      localStorage.setItem("slaw_iadeler", JSON.stringify(l));
+    }
+  }
+
+  // İade süresi: yasal 14 gün, sitede 15 güne kadar destek vaat ediliyor.
+  function iadeEdilebilirMi(s) {
+    if (!s || !["kargoda", "teslim"].includes(s.durum)) return false;
+    const baz = s.teslim_tarihi || s.kargo_verildi || s.created_at;
+    return (Date.now() - new Date(baz).getTime()) < 15 * 24 * 60 * 60 * 1000;
+  }
+
   // ---------- kargo firmaları ----------
   // Hem doğrudan kargo anlaşması hem toplu gönderi platformları desteklenir.
   // toplu:true olanlar birden çok kargo firmasını tek panelden yönetir.
@@ -512,6 +618,7 @@
       <a href="${KOK}index.html#koleksiyon">Koleksiyon</a>
       <a href="${KOK}hesap.html">Hesabım</a>
       <a href="${KOK}sepet.html">Sepetim</a>
+      <a href="${KOK}siparis-takip.html">Sipariş Takip &amp; İade</a>
       <a href="${KOK}hukuk/iade.html">İade &amp; Kargo</a>
       <a href="${KOK}hukuk/iletisim.html">İletişim</a>`;
     document.body.appendChild(panel);
@@ -542,6 +649,8 @@
     DURUMLAR, SIRADAKI, IADE_DURUMLARI, durumHaritasi, durumAdi, durumRengi,
     satici: S, saticiAlan, saticiyiBas, siparisNoUret,
     KARGO_FIRMALARI, kargoTakipLinki, kargoFirmaAdi,
+    IADE_SEBEPLERI, siparisSorgula, iadeTalepleriGetir, iadeTalebiAc,
+    iadeTalebiGuncelle, iadeEdilebilirMi,
     pixelOlay, sb: () => sb, config: C, KOK,
   };
 })();
