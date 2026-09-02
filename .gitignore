@@ -1,21 +1,12 @@
-# --- GİZLİ: Trendyol API anahtarları içeren yerel araçlar (asla push edilmez) ---
-ekle_urun.py
-soru_aktar.py
-trendyol_aktar.py
+# Mali veri asla bu herkese acik depoya girmez.
+test/
+*.xlsx
+*.xls
+veri.json
+veri-ESKI-*.json
+slawrezz-yedek-*.json
 
-# --- Yönetim paneli: parola kaynak kodda açık, public repoda yayınlanmaz ---
-admin/
-
-# --- Yerel yedek: Trendyol CDN linklerini içerir, siteye gerekmez ---
-veri/urunler.orijinal-url.json
-
-# --- Python ---
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# --- Sistem ---
+# isletim sistemi / editor
 Thumbs.db
-desktop.ini
 .DS_Store
+~$*
