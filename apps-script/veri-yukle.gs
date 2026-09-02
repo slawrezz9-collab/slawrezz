@@ -15,10 +15,26 @@
  */
 
 /* Drive'daki ham dosyalarin adlari (uzantisiz, E-Tablolar'a donusturulmus hali)
-   DIKKAT: "bircan abi2026" dosyasi BANKA HESABI verisini tutar; adi yanilticidir.
-   Cari (Bircan'dan mal alimi) verisi "SLAWREZZ_Musteri_Takip- BIRCAN"dadir. */
-var HAM_CARI = 'SLAWREZZ_Musteri_Takip- BİRCAN';
-var HAM_BANKA = 'bircan abi2026';
+
+   DIKKAT — Drive'da "bircan abi2026" adinda ESKI bir E-Tablo var (28 Agustos).
+   Guncel banka verisi "SLAWREZZ_Banka_Hesabi_Guncel" dosyasindadir. Yanlis
+   dosyayi okumamak icin ad burada acikca yazilir.
+
+   Hangi dosyanin secilecegini gormek icin once dosyalariKontrolEt() calistirin. */
+var HAM_CARI = 'SLAWREZZ_Musteri_Takip- BİRCAN';   /* Bircan cari: ondan aldigimiz mallar */
+var HAM_BANKA = 'SLAWREZZ_Banka_Hesabi_Guncel';    /* Slaw Rezz banka hesabi hareketleri  */
+
+/* Kaynak dosyalarin durdugu Drive klasorunun KIMLIGI.
+   Arama YALNIZCA bu klasorde yapilir; boylece Drive'in baska yerindeki ayni
+   adli eski dosyalar (orn. 28 Agustos tarihli "bircan abi2026") kesinlikle
+   okunamaz.
+
+   Kimligi klasorun adres cubugundan alirsiniz:
+     https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXX
+                                            ^^^^^^^^^^^^^^^^ bu kisim
+
+   Bos birakilirsa tum Drive taranir (daha riskli, onerilmez).               */
+var KAYNAK_KLASOR_ID = '1JRWDWhUDO1qza_on-6bYcXwYfiPVkErd';
 
 /* ============================================================
    1) SEKMELERI KUR
@@ -106,6 +122,12 @@ function veriYukle() {
   var odemeler = cariOdemeleri(cari);
   var kasa = bankaKasa(banka);
 
+  /* Trendyol aciklamalarindaki yazim hatalarini duzelt (TRENYOL, TREDYOL,
+     Terendyol → TRENDYOL). Parayi ALAN korunur: SLAW REZZ ile Dummy ayri kalir. */
+  trendyolYazimlariniDuzelt(kasa).forEach(function (d) {
+    Logger.log('duzeltildi: "%s"  ->  "%s"', d[0], d[1]);
+  });
+
   if (!alimlar.length || !kasa.length) {
     throw new Error('Ham dosyalardan kayıt çıkarılamadı. Dosya adlarını ve sekme yapısını kontrol edin.');
   }
@@ -136,27 +158,145 @@ function yaz(tabloAdi, kayitlar) {
   s.getRange(2, 1, satirlar.length, cfg.basliklar.length).setValues(satirlar);
 }
 
-/** Ham dosyayi Drive'da adiyla bulur ve ilk sekmesinin tamamini dondurur. */
+/**
+ * Ham dosyayi Drive'da adiyla bulur ve ilk sekmesinin tamamini dondurur.
+ *
+ * Ayni adda birden fazla dosya olabilir (bir .xlsx, bir de ondan uretilen
+ * E-Tablo gibi). Bu yuzden:
+ *   - yalnizca Google E-Tablo bicimindekiler dikkate alinir
+ *   - birden fazla varsa EN YENI degistirilmis olan secilir
+ *   - hangisinin secildigi Logger'a yazilir ki yanlis dosya sessizce okunmasin
+ */
 function hamOku(dosyaAdi) {
-  var bulunan = DriveApp.getFilesByName(dosyaAdi);
-  if (!bulunan.hasNext()) {
+  var adaylar = dosyaAdaylari(dosyaAdi);
+
+  if (!adaylar.length) {
     throw new Error(
-      '"' + dosyaAdi + '" adlı dosya Drive\'da bulunamadı. ' +
-      'Dosyayı yüklediğinizden ve Google E-Tablolar olarak açtığınızdan emin olun ' +
-      '(adında .xlsx uzantısı kalmamalı).'
+      '"' + dosyaAdi + '" adlı dosya ' + nerede() + ' bulunamadı. ' +
+      'Dosyayı yüklediğinizden ve Dosya > Google E-Tablolar olarak kaydet ile ' +
+      'dönüştürdüğünüzden emin olun (adında .xlsx uzantısı kalmamalı). ' +
+      'Hangi dosyaların görüldüğünü görmek için dosyalariKontrolEt() çalıştırın.'
     );
   }
-  var dosya = bulunan.next();
-  var kit;
+
+  var tablolar = adaylar.filter(function (d) {
+    return d.getMimeType() === MimeType.GOOGLE_SHEETS;
+  });
+
+  if (!tablolar.length) {
+    throw new Error(
+      '"' + dosyaAdi + '" bulundu ama henüz Google E-Tablolar biçiminde değil. ' +
+      'Drive\'da dosyaya çift tıklayıp Dosya > Google E-Tablolar olarak kaydet deyin, ' +
+      'sonra bu adımı tekrarlayın.'
+    );
+  }
+
+  tablolar.sort(function (a, b) { return b.getLastUpdated() - a.getLastUpdated(); });
+  var secilen = tablolar[0];
+
+  Logger.log('okunuyor: "%s"  (guncelleme: %s, id: %s)',
+    secilen.getName(),
+    Utilities.formatDate(secilen.getLastUpdated(), kitapSaatDilimi(), 'yyyy-MM-dd HH:mm'),
+    secilen.getId());
+
+  if (tablolar.length > 1) {
+    Logger.log('  UYARI: bu adda %s tablo var, en yenisi secildi. ' +
+      'Yanlissa eskilerin adini degistirin.', tablolar.length);
+  }
+
+  return SpreadsheetApp.openById(secilen.getId()).getSheets()[0].getDataRange().getValues();
+}
+
+/**
+ * Adaylari dondurur. KAYNAK_KLASOR doluysa arama yalnizca o klasorde yapilir,
+ * boylece Drive'in baska yerindeki ayni adli eski dosyalar hic gorunmez.
+ */
+function dosyaAdaylari(dosyaAdi) {
+  var liste = [];
+  var it = KAYNAK_KLASOR_ID
+    ? kaynakKlasoru().getFilesByName(dosyaAdi)
+    : DriveApp.getFilesByName(dosyaAdi);
+  while (it.hasNext()) liste.push(it.next());
+  return liste;
+}
+
+/** Kaynak klasoru kimligiyle bulur; yoksa anlasilir bir hata verir. */
+function kaynakKlasoru() {
   try {
-    kit = SpreadsheetApp.openById(dosya.getId());
+    return DriveApp.getFolderById(KAYNAK_KLASOR_ID);
   } catch (h) {
     throw new Error(
-      '"' + dosyaAdi + '" henüz Google E-Tablolar biçiminde değil. ' +
-      'Drive\'da dosyaya çift tıklayıp Dosya > Google E-Tablolar olarak kaydet deyin.'
+      'Kaynak klasör açılamadı (kimlik: ' + KAYNAK_KLASOR_ID + '). ' +
+      'Klasör silinmiş, erişiminiz kaldırılmış ya da kimlik yanlış olabilir. ' +
+      'Klasörü Drive\'da açıp adres çubuğundaki /folders/ sonrasını kopyalayıp ' +
+      'veri-yukle.gs dosyasındaki KAYNAK_KLASOR_ID satırına yazın.'
     );
   }
-  return kit.getSheets()[0].getDataRange().getValues();
+}
+
+function nerede() {
+  if (!KAYNAK_KLASOR_ID) return 'Drive\'da';
+  try {
+    return '"' + kaynakKlasoru().getName() + '" klasöründe';
+  } catch (h) {
+    return 'kaynak klasörde';
+  }
+}
+
+/**
+ * Yuklemeden ONCE calistirin: hangi dosyalarin bulundugunu ve hangisinin
+ * okunacagini gosterir. Hicbir sey yazmaz, sadece rapor verir.
+ */
+function dosyalariKontrolEt() {
+  if (KAYNAK_KLASOR_ID) {
+    try {
+      var kl = kaynakKlasoru();
+      Logger.log('Arama yeri: "%s" klasoru (yalnizca burasi)', kl.getName());
+      Logger.log('klasor kimligi: %s', kl.getId());
+      Logger.log('icindeki dosyalar:');
+      var hepsi = kl.getFiles();
+      var n = 0;
+      while (hepsi.hasNext() && n < 30) {
+        var d = hepsi.next();
+        n++;
+        Logger.log('   - %s   [%s]', d.getName(),
+          d.getMimeType() === MimeType.GOOGLE_SHEETS ? 'E-Tablo' : d.getMimeType());
+      }
+      if (!n) Logger.log('   (klasor bos)');
+    } catch (h) {
+      Logger.log('HATA: %s', h.message);
+      return;
+    }
+  } else {
+    Logger.log('Arama yeri: tum Drive (klasor sinirlamasi yok)');
+  }
+  Logger.log('');
+
+  [['CARI  (Bircan mal alimlari)', HAM_CARI],
+   ['BANKA (hesap hareketleri)', HAM_BANKA]].forEach(function (c) {
+    Logger.log('--- %s ---', c[0]);
+    Logger.log('aranan ad: "%s"', c[1]);
+
+    var adaylar;
+    try {
+      adaylar = dosyaAdaylari(c[1]);
+    } catch (h) {
+      Logger.log('  HATA: %s', h.message);
+      Logger.log('');
+      return;
+    }
+
+    adaylar.forEach(function (d) {
+      Logger.log('  %s %s  (%s)',
+        d.getMimeType() === MimeType.GOOGLE_SHEETS ? '[E-TABLO]        ' : '[DONUSTURULMEMIS]',
+        Utilities.formatDate(d.getLastUpdated(), kitapSaatDilimi(), 'yyyy-MM-dd HH:mm'),
+        d.getName());
+    });
+    if (!adaylar.length) Logger.log('  BULUNAMADI');
+    Logger.log('');
+  });
+
+  Logger.log('Not: yalnizca [E-TABLO] isaretliler okunabilir, en yenisi secilir.');
 }
 
 /* ---------- SLAWREZZ_Musteri_Takip- BIRCAN: Bircan cari hesabi ----------
@@ -192,7 +332,7 @@ function cariOdemeleri(satirlar) {
   return liste;
 }
 
-/* ---------- bircan abi2026 (BANKA HESABI): A-D gelir, E-G gider ----------
+/* ---------- SLAWREZZ_Banka_Hesabi_Guncel: A-D gelir, E-G gider ----------
    "Nereden Geldi" = bize kim para gonderdi   → GELIR
    "Nereye Gitti"  = biz kime odeme yaptik    → GIDER
    Ayni satirdaki gelir ile gider BIRBIRIYLE ILGISIZDIR. Iki blok ayri ayri
@@ -317,6 +457,76 @@ function dogrula() {
 /** Turkce I/İ/ı/i hepsi 'i'ye indirgenir; "BIRCAN" ile "Bircan" esitlenir. */
 function bircanMi(aciklama) {
   return String(aciklama || '').replace(/[İIıi]/g, 'i').toLowerCase().indexOf('bircan') >= 0;
+}
+
+/* ---------- Trendyol yazim duzeltmesi (web/hesap.js ile ayni kural) ---------- */
+
+/** Iki kelime arasindaki duzenleme uzakligi (Levenshtein). */
+function uzaklik(a, b) {
+  if (a === b) return 0;
+  var onceki = [], i, j;
+  for (j = 0; j <= b.length; j++) onceki[j] = j;
+  for (i = 1; i <= a.length; i++) {
+    var simdiki = [i];
+    for (j = 1; j <= b.length; j++) {
+      simdiki[j] = Math.min(onceki[j] + 1, simdiki[j - 1] + 1,
+        onceki[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+    }
+    onceki = simdiki;
+  }
+  return onceki[b.length];
+}
+
+function normAnahtar(s) {
+  return String(s == null ? '' : s).trim()
+    .replace(/[İIıi]/g, 'i').toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** TRENDYOL / TRENYOL / TREDYOL / Terendyol — hepsi ayni kelimedir. */
+function trendyolMu(metin) {
+  var kelimeler = normAnahtar(metin).split(/[^a-z0-9çğıöşü]+/);
+  for (var i = 0; i < kelimeler.length; i++) {
+    if (kelimeler[i].length >= 6 && uzaklik(kelimeler[i], 'trendyol') <= 2) return true;
+  }
+  return false;
+}
+
+/**
+ * Trendyol aciklamalarini tek bicime getirir: "<ÖnEk> - TRENDYOL ÖDEME".
+ * Onek olarak o gruptaki EN SIK kullanilan yazim secilir; yeni bir ad
+ * UYDURULMAZ. SLAW REZZ ile Dummy ayri gruplardir.
+ * Degistirilen satirlarin [eski, yeni] listesini dondurur.
+ */
+function trendyolYazimlariniDuzelt(kasa) {
+  var gruplar = {};
+  kasa.forEach(function (r) {
+    if (!trendyolMu(r.aciklama)) return;
+    var onEk = String(r.aciklama).split(/\s+-\s+/)[0].trim();
+    var anahtar = normAnahtar(onEk).replace(/\s+/g, '');
+    if (!gruplar[anahtar]) gruplar[anahtar] = {};
+    gruplar[anahtar][onEk] = (gruplar[anahtar][onEk] || 0) + 1;
+  });
+
+  var secim = {};
+  Object.keys(gruplar).forEach(function (anahtar) {
+    var enSik = null, enCok = -1;
+    Object.keys(gruplar[anahtar]).forEach(function (yazim) {
+      if (gruplar[anahtar][yazim] > enCok) { enCok = gruplar[anahtar][yazim]; enSik = yazim; }
+    });
+    secim[anahtar] = enSik;
+  });
+
+  var degisenler = [];
+  kasa.forEach(function (r) {
+    if (!trendyolMu(r.aciklama)) return;
+    var onEk = String(r.aciklama).split(/\s+-\s+/)[0].trim();
+    var yeni = secim[normAnahtar(onEk).replace(/\s+/g, '')] + ' - TRENDYOL ÖDEME';
+    if (yeni !== r.aciklama) {
+      degisenler.push([r.aciklama, yeni]);
+      r.aciklama = yeni;
+    }
+  });
+  return degisenler;
 }
 
 /** Dogrudan Bircan'in kendisine yapilan odeme — BORCU DUSER. */

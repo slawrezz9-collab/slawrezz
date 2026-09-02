@@ -246,6 +246,41 @@
           (a.ipucu ? '<div class="ipucu">' + kacir(a.ipucu) + '</div>' : '') + '</div>';
       }
 
+      /* ---- hatirlayan acilir liste ----
+         Daha once girilmis degerler alttan acilan menude cikar; listede
+         olmayan bir sey icin "+ Yeni yaz…" secilir ve yazi alani belirir.
+         Yeni yazilan deger bir sonraki sefer listede kendiliginden olur,
+         cunku liste her acilista kayitlardan yeniden uretilir. */
+      if (a.tip === 'liste') {
+        var secenekler = (typeof a.secenekler === 'function' ? a.secenekler() : a.secenekler) || [];
+        var norm = kok.SR.normAnahtar;
+        var eslesen = secenekler.filter(function (o) { return norm(o) === norm(d); })[0];
+        var yeniMi = d !== '' && !eslesen;
+
+        /* Hic kayit yoksa dogrudan yazi alani goster — bos menu anlamsiz olur */
+        if (!secenekler.length) {
+          return '<div class="alan"><label for="al-' + a.anahtar + '">' + kacir(a.etiket) + '</label>' +
+            '<input id="al-' + a.anahtar + '" name="' + a.anahtar + '" type="text" value="' + kacir(d) + '">' +
+            (a.ipucu ? '<div class="ipucu">' + kacir(a.ipucu) + '</div>' : '') + '</div>';
+        }
+
+        return '<div class="alan">' +
+          '<label for="al-' + a.anahtar + '-s">' + kacir(a.etiket) + '</label>' +
+          '<select id="al-' + a.anahtar + '-s" data-liste="' + a.anahtar + '">' +
+            '<option value=""' + (d === '' ? ' selected' : '') + '>— seçin —</option>' +
+            secenekler.map(function (o) {
+              return '<option value="' + kacir(o) + '"' +
+                (eslesen === o ? ' selected' : '') + '>' + kacir(o) + '</option>';
+            }).join('') +
+            '<option value="__yeni"' + (yeniMi ? ' selected' : '') + '>+ Yeni yaz…</option>' +
+          '</select>' +
+          '<input id="al-' + a.anahtar + '" name="' + a.anahtar + '" type="text" ' +
+            'value="' + kacir(d) + '" placeholder="' + kacir(a.yeniIpucu || 'Yenisini yazın') + '"' +
+            (yeniMi ? '' : ' hidden') + ' style="margin-top:8px">' +
+          (a.ipucu ? '<div class="ipucu">' + kacir(a.ipucu) + '</div>' : '') +
+        '</div>';
+      }
+
       return '<div class="alan"><label for="al-' + a.anahtar + '">' + kacir(a.etiket) + '</label>' +
         '<input id="al-' + a.anahtar + '" name="' + a.anahtar + '" type="' + (a.tip || 'text') + '" ' +
         'value="' + kacir(d) + '"' +
@@ -267,6 +302,31 @@
     var kapat = kipAc(kip);
     var f = kip.querySelector('form');
     setTimeout(function () { var ilk = f.querySelector('input,select'); if (ilk) ilk.focus(); }, 60);
+
+    /* Acilir liste ile yazi alanini birbirine bagla.
+       Gercek deger her zaman <input name="anahtar"> icinde durur; menuden
+       secilen deger oraya kopyalanir. Boylece gonderme kodu degismez. */
+    f.querySelectorAll('[data-liste]').forEach(function (secim) {
+      var anahtar = secim.getAttribute('data-liste');
+      var girdi = f.querySelector('[name="' + anahtar + '"]');
+      if (!girdi) return;
+
+      secim.addEventListener('change', function () {
+        if (secim.value === '__yeni') {
+          girdi.hidden = false;
+          girdi.value = '';
+          girdi.focus();
+        } else {
+          girdi.hidden = true;
+          girdi.value = secim.value;
+        }
+        girdi.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    });
+
+    /* Form kurulduktan sonra ek davranis baglanabilir
+       (orn. urun secilince son birim fiyati otomatik doldurmak). */
+    if (typeof cfg.formHazir === 'function') cfg.formHazir(f, kayit);
 
     kip.querySelector('[data-vazgec]').onclick = kapat;
     f.onsubmit = function (e) { e.preventDefault(); gonder(); };

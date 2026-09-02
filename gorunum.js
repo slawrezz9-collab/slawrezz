@@ -26,6 +26,36 @@
     '</div>';
   }
 
+  /* ============================================================
+     ONERILER — daha once girilmis degerleri hatirlar
+     Ayni sey farkli yazilmissa (BIRCAN / Bircan) tek oneri gosterilir;
+     gosterilen yazim EN SON kullanilan halidir. Sik kullanilan basta gelir.
+     ============================================================ */
+  function oneriListesi(satirlar, alanFn) {
+    var m = new Map();
+    satirlar.forEach(function (r) {
+      var ham = String(alanFn(r) || '').trim();
+      if (!ham) return;
+      var nk = kok.SR.normAnahtar(ham);
+      var o = m.get(nk);
+      if (o) { o.sayi++; o.k = ham; }        /* en son yazim kazanir */
+      else m.set(nk, { k: ham, sayi: 1 });
+    });
+    return Array.from(m.values())
+      .sort(function (a, b) { return b.sayi - a.sayi || a.k.localeCompare(b.k, 'tr'); })
+      .map(function (o) { return o.k; });
+  }
+
+  /** Bir urunun en son kullanilan birim fiyati (yoksa null). */
+  function sonBirimFiyat(urunAdi) {
+    var nk = kok.SR.normAnahtar(urunAdi);
+    if (!nk) return null;
+    var eslesen = H().siparisler().filter(function (r) {
+      return kok.SR.normAnahtar(r.urun) === nk;
+    });
+    return eslesen.length ? +eslesen[eslesen.length - 1].fiyat : null;
+  }
+
   function grafikKart(baslik, aciklama, cizFn, dipnot) {
     var k = el(
       '<section class="kart">' +
@@ -71,10 +101,41 @@
         },
         alanlar: [
           { anahtar: 't', etiket: 'Alım tarihi', tip: 'date', varsayilan: U.bugun },
-          { anahtar: 'urun', etiket: 'Ürün', ipucu: 'Örn. pullu, şort etek, keten etek' },
+          {
+            anahtar: 'urun', etiket: 'Hangi ürün',
+            tip: 'liste',
+            yeniIpucu: 'Yeni ürün adı yazın',
+            ipucu: 'Listeden seçin. Yeni bir ürünse “+ Yeni yaz…” deyip yazın; ' +
+                   'bir dahaki sefere listede çıkar.',
+            secenekler: function () {
+              return oneriListesi(H().siparisler(), function (r) { return r.urun; });
+            }
+          },
           { anahtar: 'adet', etiket: 'Adet', tip: 'number' },
-          { anahtar: 'fiyat', etiket: 'Birim fiyat (₺)', tip: 'number' }
-        ]
+          {
+            anahtar: 'fiyat', etiket: 'Birim fiyat (₺)', tip: 'number',
+            ipucu: 'Bilinen bir ürün seçerseniz son fiyatı kendiliğinden gelir.'
+          }
+        ],
+
+        /* Urun secilince o urunun son birim fiyatini otomatik doldurur.
+           Kullanici fiyati kendisi degistirdiyse bir daha dokunmaz. */
+        formHazir: function (form) {
+          var urunAlani = form.querySelector('[name="urun"]');
+          var fiyatAlani = form.querySelector('[name="fiyat"]');
+          if (!urunAlani || !fiyatAlani) return;
+
+          var elleGirildi = fiyatAlani.value !== '';
+          fiyatAlani.addEventListener('input', function () { elleGirildi = true; });
+
+          function doldur() {
+            if (elleGirildi) return;
+            var f = sonBirimFiyat(urunAlani.value);
+            fiyatAlani.value = (f === null) ? '' : f;
+          }
+          urunAlani.addEventListener('change', doldur);
+          urunAlani.addEventListener('input', doldur);
+        }
       };
     },
 
@@ -92,8 +153,7 @@
         ],
         mobilBaslik: function () { return 'Bircan Abi\'ye ödeme'; },
         mobilAlt: function (r) {
-          return '<span>' + F.tarih(r.t) + '</span><span>cari defteri</span>' +
-            (r.ekleyen ? '<span>' + kacir(r.ekleyen) + '</span>' : '');
+          return '<span>' + F.tarih(r.t) + '</span><span>cari defteri</span>';
         },
         mobilTutar: function (r) { return '<span class="azalan">−' + F.para(r.tutar) + '</span>'; },
         toplamlar: function (liste) {
@@ -167,8 +227,7 @@
         ],
         mobilBaslik: function (r) { return kacir(r.aciklama); },
         mobilAlt: function (r) {
-          return '<span>' + F.tarih(r.t) + '</span><span>' + r.tur + '</span>' +
-            (r.ekleyen ? '<span>' + kacir(r.ekleyen) + '</span>' : '');
+          return '<span>' + F.tarih(r.t) + '</span><span>' + r.tur + '</span>';
         },
         mobilTutar: function (r) {
           return r.tur === 'Gelir'
@@ -186,7 +245,25 @@
         },
         alanlar: [
           { anahtar: 't', etiket: 'Tarih', tip: 'date', varsayilan: U.bugun },
-          { anahtar: 'aciklama', etiket: 'Açıklama', ipucu: 'Nereden geldi / nereye gitti' },
+          {
+            anahtar: 'aciklama',
+            etiket: suzgec === 'Gelir' ? 'Gelirin nereden geldiği'
+                  : suzgec === 'Gider' ? 'Paranın nereye gittiği'
+                  : 'Nereden geldi / nereye gitti',
+            tip: 'liste',
+            yeniIpucu: suzgec === 'Gelir' ? 'Yeni gelir kaynağı yazın'
+                     : suzgec === 'Gider' ? 'Yeni gider yeri yazın'
+                     : 'Yeni açıklama yazın',
+            ipucu: 'Listeden seçin. Yeni bir yer varsa “+ Yeni yaz…” deyip yazın; ' +
+                   'bir dahaki sefere listede çıkar.',
+            /* Gelir formunda gelir kaynaklari, gider formunda gider yerleri
+               listelenir — menu kisa ve isabetli kalsin diye. */
+            secenekler: function () {
+              var liste = H().kasa();
+              if (suzgec) liste = liste.filter(function (r) { return r.tur === suzgec; });
+              return oneriListesi(liste, function (r) { return r.aciklama; });
+            }
+          },
           { anahtar: 'tur', etiket: 'Tür', tip: 'secim', secenekler: ['Gelir', 'Gider'], varsayilan: suzgec || 'Gider' },
           { anahtar: 'tutar', etiket: 'Tutar (₺)', tip: 'number', ipucu: 'Her zaman pozitif yazın; artı mı eksi mi olduğunu Tür belirler.' }
         ]
@@ -313,8 +390,8 @@
     /* ---------------- GELİRLER ---------------- */
     gelirler: function () {
       var h = H(), b = h.banka(), s = h.cumleler();
-      var kaynaklar = h.grupNorm(b.gelirler, function (r) { return r.aciklama; },
-        function (r) { return +r.tutar; }).sort(function (a, c) { return c.v - a.v; });
+      /* Yazim hatalari birlesir, ama parayi kimin aldigi ayri kalir. */
+      var kaynaklar = h.gelirKaynaklari();
 
       var enBuyuk = b.gelirler.length
         ? b.gelirler.reduce(function (a, r) { return +r.tutar > +a.tutar ? r : a; }) : null;
@@ -338,7 +415,7 @@
       setTimeout(function () {
         v.querySelector('#ge1').appendChild(grafikKart(
           'Para nereden geldi',
-          'Açıklamaya göre toplam giriş. Büyük/küçük harf farkları tek kalemde toplanır.',
+          'Açıklamaya göre toplam giriş.',
           function () { return U.yatayListe(kaynaklar, renk('--yesil'), b.gelir); }
         ));
         v.querySelector('#ge2').appendChild(defterKur(CFG.kasa('Gelir')));
@@ -620,7 +697,6 @@
           '<div class="kart-govde">' +
             '<div class="kd">' +
               '<div class="k">Durum</div><div class="d">' + durum.metin + '</div>' +
-              '<div class="k">Kullanıcı</div><div class="d">' + kacir(kok.SRApi.Api.kullanici || '—') + '</div>' +
               '<div class="k">Bekleyen kayıt</div><div class="d">' + durum.bekleyen + '</div>' +
               '<div class="k">Son yedek</div><div class="d">' + kacir(durum.sonYedek || 'henüz alınmadı') + '</div>' +
             '</div>' +
@@ -664,12 +740,6 @@
           '</div></div>' +
         '</section>' +
 
-        '<section class="kart">' +
-          '<div class="kart-tepe"><div class="esne"><h2>Oturum</h2></div></div>' +
-          '<div class="kart-govde">' +
-            '<button class="dg tehlike" data-cikis>Çıkış yap</button>' +
-          '</div>' +
-        '</section>' +
       '</div>');
 
       v.querySelector('[data-yenile]').onclick = function () {
@@ -717,7 +787,6 @@
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       };
-      v.querySelector('[data-cikis]').onclick = function () { kok.App.cikis(); };
 
       return v;
     }

@@ -202,6 +202,10 @@
     suan: 'ozet',
     raporAyi: null,
 
+    /**
+     * Giris ekrani YOKTUR: adresi acan dogrudan uygulamaya girer.
+     * (Bu bilincli bir tercihtir; korumayi yalnizca adresin bilinmesi saglar.)
+     */
     baslat: function () {
       App.temaKur();
 
@@ -210,8 +214,35 @@
         return;
       }
 
-      // Kullanici listesi icin PIN'siz bir deneme yapamayiz; once giris ekrani.
-      App.girisEkrani();
+      App.yukleniyorEkrani();
+      Depo.tazele()
+        .then(function () { App.arayuzKur(); })
+        .catch(function (h) { App.acilisHatasi(h); });
+    },
+
+    yukleniyorEkrani: function () {
+      document.getElementById('kok').innerHTML =
+        '<div class="yukleme-perde">' +
+          '<span class="donuyor" style="width:22px;height:22px"></span>' +
+          '<span>Defter açılıyor…</span>' +
+        '</div>';
+    },
+
+    /** Acilista veri gelmezse: sebebi soyle, tekrar denemeyi teklif et. */
+    acilisHatasi: function (hata) {
+      var ekran = el(
+        '<div class="giris"><div class="giris-kart">' +
+          '<div class="marka">Slaw Rezz</div>' +
+          '<div class="alt-marka">Muhasebe defteri</div>' +
+          '<div class="uyari-kutu"><b>Veriler açılamadı.</b><br>' +
+          kacir(hata && hata.message ? hata.message : 'Bilinmeyen bir hata oluştu.') +
+          '</div>' +
+          '<button class="dg ana" style="width:100%" data-tekrar>Tekrar dene</button>' +
+        '</div></div>'
+      );
+      document.getElementById('kok').innerHTML = '';
+      document.getElementById('kok').appendChild(ekran);
+      ekran.querySelector('[data-tekrar]').onclick = function () { App.baslat(); };
     },
 
     /* ---------- tema ---------- */
@@ -246,129 +277,6 @@
           '<code>api.js</code> dosyasındaki <b>ADRES</b> ve <b>ANAHTAR</b> ' +
           'alanları henüz doldurulmamış. KURULUM.md’deki <b>Bölüm 4, Adım 4.1</b>’i uygulayın.</div>' +
         '</div></div>';
-    },
-
-    /* ---------- giris: 1) PIN  2) kim giriyor ----------
-       Kullanici listesi Ayarlar sekmesinde durdugu icin PIN'den ONCE
-       okunamaz — bu yuzden iki adimli. */
-    girisEkrani: function () {
-      var ekran = el(
-        '<div class="giris"><div class="giris-kart">' +
-          '<div class="marka">Slaw Rezz</div>' +
-          '<div class="alt-marka">Muhasebe defteri</div>' +
-          '<div class="alan"><label for="pin-1">PIN</label>' +
-            '<div class="pin-sira">' +
-              [1, 2, 3, 4, 5, 6].map(function (i) {
-                return '<input id="pin-' + i + '" type="password" inputmode="numeric" ' +
-                  'autocomplete="off" maxlength="1" aria-label="PIN hane ' + i + '">';
-              }).join('') +
-            '</div>' +
-            '<div class="ipucu">4–6 haneli PIN. Doğru PIN girilmeden hiçbir rakam görünmez.</div>' +
-          '</div>' +
-          '<p class="giris-hata" data-hata role="alert"></p>' +
-          '<button class="dg ana" style="width:100%" data-gir>Aç</button>' +
-        '</div></div>'
-      );
-
-      document.getElementById('kok').innerHTML = '';
-      document.getElementById('kok').appendChild(ekran);
-
-      var kutular = [].slice.call(ekran.querySelectorAll('.pin-sira input'));
-      kutular.forEach(function (k, i) {
-        k.addEventListener('input', function () {
-          k.value = k.value.replace(/\D/g, '').slice(0, 1);
-          if (k.value && kutular[i + 1]) kutular[i + 1].focus();
-          /* 4 hane doldu ve sonrası boşsa kullanıcı Enter'a basmadan bekleyebilir */
-        });
-        k.addEventListener('keydown', function (e) {
-          if (e.key === 'Backspace' && !k.value && kutular[i - 1]) kutular[i - 1].focus();
-          if (e.key === 'Enter') gir();
-        });
-        k.addEventListener('paste', function (e) {
-          var yapistirilan = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
-          if (!yapistirilan) return;
-          e.preventDefault();
-          kutular.forEach(function (kk, ix) { kk.value = yapistirilan.charAt(ix) || ''; });
-          kutular[Math.min(yapistirilan.length, kutular.length - 1)].focus();
-        });
-      });
-      setTimeout(function () { kutular[0].focus(); }, 120);
-
-      var hataAlan = ekran.querySelector('[data-hata]');
-      var girBtn = ekran.querySelector('[data-gir]');
-      girBtn.onclick = gir;
-
-      function gir() {
-        var pin = kutular.map(function (k) { return k.value; }).join('');
-        if (pin.length < 4) { hataAlan.textContent = 'PIN en az 4 hane olmalı.'; return; }
-
-        hataAlan.textContent = '';
-        girBtn.disabled = true;
-        girBtn.innerHTML = '<span class="donuyor"></span> Açılıyor';
-
-        Api.pin = pin;
-
-        Depo.tazele().then(function () {
-          App.kullaniciSec();
-        }).catch(function (h) {
-          Api.pin = null;
-          girBtn.disabled = false;
-          girBtn.textContent = 'Aç';
-          kutular.forEach(function (k) { k.value = ''; });
-          kutular[0].focus();
-          hataAlan.textContent = h.message ||
-            'Açılamadı. İnternet bağlantınızı ve PIN’i kontrol edin.';
-        });
-      }
-    },
-
-    /** PIN dogrulandiktan sonra: kim giriyor? */
-    kullaniciSec: function () {
-      var liste = Depo.kullanicilar || [];
-      var kayitli = Api.kullanici;
-
-      /* Tek kullanici tanimliysa ya da daha once secilmisse sorma */
-      if (kayitli && (!liste.length || liste.indexOf(kayitli) >= 0)) return App.arayuzKur();
-      if (liste.length === 1) { Api.kullaniciYaz(liste[0]); return App.arayuzKur(); }
-
-      var ekran = el(
-        '<div class="giris"><div class="giris-kart">' +
-          '<div class="marka">Kim giriyor?</div>' +
-          '<div class="alt-marka">Eklediğiniz kayıtların yanında bu ad görünür.</div>' +
-          '<div class="menu-liste">' +
-            liste.map(function (ad) {
-              return '<button data-kisi="' + kacir(ad) + '">' + kacir(ad) + '</button>';
-            }).join('') +
-          '</div>' +
-          '<div class="alan" style="margin-top:16px"><label for="baska-ad">Listede yoksa</label>' +
-            '<input id="baska-ad" type="text" autocomplete="name" placeholder="Adınız" value="' +
-            kacir(kayitli) + '"></div>' +
-          '<p class="giris-hata" data-hata role="alert"></p>' +
-          '<button class="dg ana" style="width:100%" data-devam>Devam</button>' +
-        '</div></div>'
-      );
-
-      document.getElementById('kok').innerHTML = '';
-      document.getElementById('kok').appendChild(ekran);
-
-      ekran.querySelectorAll('[data-kisi]').forEach(function (b) {
-        b.onclick = function () {
-          Api.kullaniciYaz(b.getAttribute('data-kisi'));
-          App.arayuzKur();
-        };
-      });
-      ekran.querySelector('[data-devam]').onclick = function () {
-        var ad = ekran.querySelector('#baska-ad').value.trim();
-        if (!ad) { ekran.querySelector('[data-hata]').textContent = 'Bir ad seçin veya yazın.'; return; }
-        Api.kullaniciYaz(ad);
-        App.arayuzKur();
-      };
-    },
-
-    cikis: function () {
-      Api.pin = null;
-      U.bildir('Çıkış yapıldı.');
-      App.girisEkrani();
     },
 
     /* ---------- ana iskelet ---------- */
@@ -503,7 +411,7 @@
             '<button data-menu="ayarlar">' + U.S.ayar + 'Ayarlar' +
               '<span class="kucuk-not">' + kacir(durum.metin) + '</span></button>' +
             '<button data-tema>' + U.S.tema + 'Açık / koyu tema</button>' +
-            '<button data-cikis>' + U.S.cikis + 'Çıkış yap</button>' +
+            '<button data-yenile>' + U.S.yedek + 'Verileri yenile</button>' +
           '</div></div>' +
           '<div class="ayak"><button class="dg" data-kapat>Kapat</button></div>' +
         '</div>'
@@ -514,7 +422,11 @@
         b.onclick = function () { kapat(); App.git(b.getAttribute('data-menu')); };
       });
       kip.querySelector('[data-tema]').onclick = function () { kapat(); App.temaDegistir(); };
-      kip.querySelector('[data-cikis]').onclick = function () { kapat(); App.cikis(); };
+      kip.querySelector('[data-yenile]').onclick = function () {
+        kapat();
+        Depo.tazele(true).then(function () { U.bildir('Veriler yenilendi.'); App.ciz(); })
+          .catch(function (h) { U.bildir(h.message, true); });
+      };
     },
 
     /* ---------- yeni kayit ---------- */

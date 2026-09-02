@@ -94,6 +94,46 @@
     return liste.reduce(function (t, r) { return t + (+sec(r) || 0); }, 0);
   }
 
+  /* ---------- yazim hatasi toleransi ----------
+     Iki kelime arasindaki duzenleme uzakligi (Levenshtein). "trenyol" ile
+     "trendyol" arasindaki fark 1'dir; boyle kucuk hatalar ayni kelime sayilir. */
+  function uzaklik(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+
+    var onceki = [];
+    for (var j = 0; j <= b.length; j++) onceki[j] = j;
+
+    for (var i = 1; i <= a.length; i++) {
+      var simdiki = [i];
+      for (var k = 1; k <= b.length; k++) {
+        simdiki[k] = Math.min(
+          onceki[k] + 1,                                              /* silme  */
+          simdiki[k - 1] + 1,                                         /* ekleme */
+          onceki[k - 1] + (a.charAt(i - 1) === b.charAt(k - 1) ? 0 : 1) /* degis */
+        );
+      }
+      onceki = simdiki;
+    }
+    return onceki[b.length];
+  }
+
+  /**
+   * Aciklamada "Trendyol" gecip gecmedigini yazim hatalarina ragmen anlar.
+   * Gercek veride su yazimlarin hepsi ayni odemedir:
+   *   TRENDYOL · TRENYOL · TREDYOL · Terendyol · TRENDYOL ÖDE
+   */
+  function trendyolMu(metin) {
+    var kelimeler = normAnahtar(metin).split(/[^a-z0-9çğıöşü]+/);
+    for (var i = 0; i < kelimeler.length; i++) {
+      var k = kelimeler[i];
+      if (k.length < 6) continue;
+      if (uzaklik(k, 'trendyol') <= 2) return true;
+    }
+    return false;
+  }
+
   function tariheGore(a, b) { return String(a.t).localeCompare(String(b.t)); }
 
   /* ============================================================
@@ -115,6 +155,49 @@
     },
     odemeler: function () { return (this.veri.odemeler || []).slice().sort(tariheGore); },
     kasa: function () { return (this.veri.kasa || []).slice().sort(tariheGore); },
+
+    trendyolMu: function (aciklama) { return trendyolMu(aciklama); },
+
+    /**
+     * Gelir kaynaklarini gruplar.
+     *
+     * "TRENDYOL" kelimesinin yazim hatalari (TRENYOL, TREDYOL, Terendyol,
+     * TRENDYOL ÖDE) ayni sey sayilir — AMA odemeyi kimin aldigi korunur:
+     *   "SLAW REZZ - TRENDYOL ÖDEME"  ve  "SLAWREZZ - TRENYOL ÖDEME"  → ayni
+     *   "Dummy - TREDYOL ÖDEME"       ve  "Dummy - Terendyol ödeme"   → ayni
+     *   ama SLAW REZZ ile Dummy AYRI KALIR, cunku ayri hesaplardir.
+     *
+     * Ham tabloda aciklamalar yazildigi gibi durur; birlestirme yalnizca
+     * bu ozet listesindedir.
+     */
+    gelirKaynaklari: function () {
+      var self = this;
+      var m = new Map();
+
+      this.banka().gelirler.forEach(function (r) {
+        var ham = String(r.aciklama || '').trim();
+        var anahtar, etiket;
+
+        if (self.trendyolMu(ham)) {
+          /* Aciklama "KIM - NE" bicimindedir; kimi koruyup neyi sabitliyoruz.
+             "SLAW REZZ" ile "SLAWREZZ" ayni sayilsin diye anahtardan
+             bosluklar da atilir. */
+          var onEk = ham.split(/\s+-\s+/)[0].trim();
+          anahtar = 'trendyol|' + normAnahtar(onEk).replace(/\s+/g, '');
+          etiket = (onEk || 'Trendyol') + ' — Trendyol ödemesi';
+        } else {
+          anahtar = 'diger|' + normAnahtar(ham);
+          etiket = ham;
+        }
+
+        if (!m.has(anahtar)) m.set(anahtar, { k: etiket, v: 0, adet: 0 });
+        var o = m.get(anahtar);
+        o.v += (+r.tutar || 0);
+        o.adet++;
+      });
+
+      return Array.from(m.values()).sort(function (a, b) { return b.v - a.v; });
+    },
 
     /* --- Bircan ile ilgili kayit siniflandirmasi --- */
 
@@ -364,7 +447,10 @@
   };
 
   /* ---------- disari acilan yuzey ---------- */
-  var api = { Hesap: Hesap, F: F, normAnahtar: normAnahtar, AYLAR: AYLAR };
+  var api = {
+    Hesap: Hesap, F: F, AYLAR: AYLAR,
+    normAnahtar: normAnahtar, trendyolMu: trendyolMu, uzaklik: uzaklik
+  };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   kok.SR = api;

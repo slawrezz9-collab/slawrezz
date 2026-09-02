@@ -73,14 +73,36 @@ function ayarlarGuvenli() {
   };
 }
 
+/**
+ * Yedek klasorunu bulur veya olusturur.
+ * Mumkunse kaynak klasorun ICINE kurar, boylece muhasebeye ait her sey
+ * Drive'da tek yerde toplanir. Kaynak klasor yoksa Drive kokune duser.
+ */
 function yedekKlasoru() {
   var kayitli = ayarlariOku().yedek_klasor_id;
   if (kayitli) {
     try { return DriveApp.getFolderById(kayitli); } catch (h) { /* silinmis, yeniden kur */ }
   }
-  var bulunan = DriveApp.getFoldersByName(YEDEK_KLASOR_ADI);
-  var klasor = bulunan.hasNext() ? bulunan.next() : DriveApp.createFolder(YEDEK_KLASOR_ADI);
+
+  /* KAYNAK_KLASOR_ID veri-yukle.gs'te tanimlidir; o dosya yoksa da calisalim */
+  var ust = null;
+  if (typeof KAYNAK_KLASOR_ID !== 'undefined' && KAYNAK_KLASOR_ID) {
+    try { ust = DriveApp.getFolderById(KAYNAK_KLASOR_ID); } catch (h) { ust = null; }
+  }
+
+  var klasor = null;
+  var bulunan = ust ? ust.getFoldersByName(YEDEK_KLASOR_ADI)
+                    : DriveApp.getFoldersByName(YEDEK_KLASOR_ADI);
+  if (bulunan.hasNext()) {
+    klasor = bulunan.next();
+  } else {
+    klasor = ust ? ust.createFolder(YEDEK_KLASOR_ADI)
+                 : DriveApp.createFolder(YEDEK_KLASOR_ADI);
+  }
+
   ayarYaz('yedek_klasor_id', klasor.getId());
+  Logger.log('Yedek klasoru: %s  (%s)', klasor.getName(),
+    ust ? 'kaynak klasorun icinde' : "Drive kokunde");
   return klasor;
 }
 

@@ -420,6 +420,7 @@ a { color: var(--mavi); }
   margin-bottom: 6px;
 }
 .alan .ipucu { font-size: 11.5px; color: var(--murekkep-3); margin-top: 5px; line-height: 1.45; }
+.alan [hidden] { display: none !important; }
 
 input, select, textarea {
   font: 400 16px/1.3 var(--govde);   /* 16px: iOS'ta odaklanınca sayfayı büyütmez */
