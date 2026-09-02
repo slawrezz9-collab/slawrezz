@@ -243,8 +243,8 @@
           '<div class="marka">Slaw Rezz</div>' +
           '<div class="alt-marka">Muhasebe</div>' +
           '<div class="uyari-kutu"><b>Kurulum tamamlanmamış.</b><br>' +
-          '<code>web/api.js</code> dosyasındaki <b>ADRES</b> ve <b>ANAHTAR</b> ' +
-          'alanları henüz doldurulmamış. KURULUM.md dosyasındaki 5. adımı uygulayın.</div>' +
+          '<code>api.js</code> dosyasındaki <b>ADRES</b> ve <b>ANAHTAR</b> ' +
+          'alanları henüz doldurulmamış. KURULUM.md’deki <b>Bölüm 4, Adım 4.1</b>’i uygulayın.</div>' +
         '</div></div>';
     },
 
