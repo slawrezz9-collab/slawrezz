@@ -52,32 +52,128 @@ var EN_YENI_TARIH = '2100-01-01';
    1) GIRIS NOKTALARI
    ============================================================ */
 
-function doPost(e) {
-  var istek;
+/**
+ * ============================================================
+ *  BASLAT  —  KURULUMUN TAMAMI TEK DUGMEDE
+ * ------------------------------------------------------------
+ *  Calistirilacak fonksiyon budur. Sirasiyla:
+ *    1) sekmeleri olusturur        (kurulumYap)
+ *    2) hangi dosyalari okuyacagini yazar (dosyalariKontrolEt)
+ *    3) verileri aktarir           (veriYukle)
+ *    4) gunluk yedegi kurar        (yedekTetikleyiciKur)
+ *
+ *  Tekrar tekrar calistirilabilir: dolu sekmelerin uzerine YAZMAZ.
+ *  Bu fonksiyon dosyanin en ustundedir; editor acilir kutuda varsayilan
+ *  olarak dosyadaki ILK fonksiyonu secer, boylece yanlislikla bos bir
+ *  fonksiyon calistirilmaz.
+ * ============================================================
+ */
+function BASLAT() {
+  Logger.log('=== SLAW REZZ MUHASEBE — KURULUM ===');
+  Logger.log('');
+
+  /* Bu proje bir E-Tabloya BAGLI mi? Bagli degilse hicbir sey calismaz;
+     bunu bastan ve anlasilir sekilde soyleyelim. */
+  var kit = null;
+  try { kit = SpreadsheetApp.getActiveSpreadsheet(); } catch (h) { kit = null; }
+  if (!kit) {
+    Logger.log('!!! DURDU: Bu Apps Script projesi bir E-Tabloya bagli degil.');
+    Logger.log('');
+    Logger.log('Cozum: bu sekmeyi kapatin, Drive\'da "Slaw Rezz Muhasebe"');
+    Logger.log('tablosunu acin ve ORADAN  Uzantilar > Apps Script  deyin.');
+    Logger.log('Acilan bos projeye dosyalari yeniden yapistirin.');
+    return;
+  }
+  Logger.log('Bagli tablo: %s', kit.getName());
+  Logger.log('');
+
+  var adimlar = [
+    ['1/4  Sekmeler olusturuluyor', kurulumYap],
+    ['2/4  Kaynak dosyalar kontrol ediliyor', dosyalariKontrolEt],
+    ['3/4  Veriler aktariliyor', veriYukle],
+    ['4/4  Gunluk yedek kuruluyor', yedekTetikleyiciKur]
+  ];
+
+  for (var i = 0; i < adimlar.length; i++) {
+    Logger.log('--- %s ---', adimlar[i][0]);
+    try {
+      adimlar[i][1]();
+    } catch (hata) {
+      Logger.log('');
+      Logger.log('!!! DURDU: %s', hata.message);
+      Logger.log('');
+      Logger.log('Bu mesaji oldugu gibi kopyalayip iletin. Onceki adimlar');
+      Logger.log('yapildiysa bozulmadi; sorun giderilince BASLAT tekrar');
+      Logger.log('calistirilabilir, dolu sekmelerin uzerine yazmaz.');
+      return;
+    }
+    Logger.log('');
+  }
+
+  Logger.log('=== KURULUM TAMAM ===');
+  Logger.log('Sirada: Dagit > Yeni dagitim > Web uygulamasi');
+  Logger.log('  Yuruten     : Ben');
+  Logger.log('  Erisimi olan: Baglantiya sahip herkes  (veya Yalnizca ben)');
+  Logger.log('Cikan .../exec adresi uygulamanin kendisidir.');
+}
+
+/**
+ * UYGULAMANIN KENDISI.
+ * Adres tarayicida acilinca muhasebe defteri gelir — arayuz de veri de burada.
+ * Arayuz.html, web/ klasorundeki dosyalardan uretilmis tek parca sayfadir.
+ */
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Arayuz')
+    .setTitle('Slaw Rezz Muhasebe')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Sayfa icinden gelen istekler (google.script.run).
+ * Gizli anahtar/PIN aranmaz: sayfayi zaten Google'in kendisi, dagitim
+ * ayarindaki kisilere sunmustur. Kimlik dogrulamasi Google tarafinda yapilir.
+ */
+function istek(govdeJson) {
+  var g;
   try {
-    istek = JSON.parse(e.postData.contents);
+    g = JSON.parse(govdeJson || '{}');
+  } catch (hata) {
+    return JSON.stringify({ ok: false, hata: 'İstek okunamadı.' });
+  }
+  g.__icerden = true;
+
+  try {
+    return JSON.stringify(yonlendir(g));
+  } catch (hata) {
+    return JSON.stringify({
+      ok: false,
+      hata: 'Sunucu hatası: ' + (hata && hata.message ? hata.message : hata)
+    });
+  }
+}
+
+/**
+ * Baska bir adresten (orn. GitHub Pages) gelen istekler.
+ * Bu yol kullanilmiyorsa da duruyor; arayuzu disariya tasimak isterseniz calisir.
+ */
+function doPost(e) {
+  var gelen;
+  try {
+    gelen = JSON.parse(e.postData.contents);
   } catch (hata) {
     return cevap({ ok: false, hata: 'İstek okunamadı. Lütfen sayfayı yenileyip tekrar deneyin.' });
   }
 
+  /* Disaridan gelen istek kendini "icerden" ilan edemesin. */
+  delete gelen.__icerden;
+
   try {
-    return cevap(yonlendir(istek));
+    return cevap(yonlendir(gelen));
   } catch (hata) {
     // Beklenmeyen hatalar da sessizce yutulmaz, kullaniciya Turkce doner.
     return cevap({ ok: false, hata: 'Sunucu hatası: ' + (hata && hata.message ? hata.message : hata) });
   }
-}
-
-/** Tarayiciya adres dogrudan yazilirsa bilgilendirici bir sayfa gosterir. */
-function doGet() {
-  return HtmlService.createHtmlOutput(
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<div style="font:16px/1.6 system-ui;max-width:34em;margin:12vh auto;padding:0 6vw;color:#14161B">' +
-    '<h1 style="font-size:1.3rem">Slaw Rezz Muhasebe — veri sunucusu</h1>' +
-    '<p>Burası uygulamanın veri adresidir, arayüzü değildir. ' +
-    'Uygulamayı açmak için ana ekranınızdaki <b>Slaw Rezz</b> kısayolunu kullanın.</p>' +
-    '</div>'
-  );
 }
 
 function cevap(nesne) {
@@ -92,19 +188,20 @@ function cevap(nesne) {
 
 function yonlendir(istek) {
   var op = String(istek.op || '');
-
-  // Gizli anahtar her istekte aranir.
   var ayarlar = ayarlariOku();
-  if (!ayarlar.gizli_anahtar) {
-    return { ok: false, hata: 'Kurulum tamamlanmamış: Ayarlar sekmesinde gizli_anahtar yok.' };
-  }
-  if (String(istek.anahtar || '') !== String(ayarlar.gizli_anahtar)) {
-    return { ok: false, hata: 'Bu uygulamaya erişim izniniz yok.', yetkisiz: true };
-  }
 
-  // PIN de her istekte aranir — okuma dahil.
-  if (!pinDogru(istek.pin, ayarlar)) {
-    return { ok: false, hata: 'PIN yanlış.', pinGerekli: true };
+  /* Sayfa Apps Script'ten sunulduysa kimligi Google dogrulamistir; anahtar
+     ve PIN aranmaz. Disaridan gelen isteklerde ikisi de sorulur. */
+  if (!istek.__icerden) {
+    if (!ayarlar.gizli_anahtar) {
+      return { ok: false, hata: 'Kurulum tamamlanmamış: Ayarlar sekmesinde gizli_anahtar yok.' };
+    }
+    if (String(istek.anahtar || '') !== String(ayarlar.gizli_anahtar)) {
+      return { ok: false, hata: 'Bu uygulamaya erişim izniniz yok.', yetkisiz: true };
+    }
+    if (!pinDogru(istek.pin, ayarlar)) {
+      return { ok: false, hata: 'PIN yanlış.', pinGerekli: true };
+    }
   }
 
   switch (op) {

@@ -51,7 +51,6 @@ function kurulumYap() {
       .setFontWeight('bold')
       .setBackground('#EFECE4');
     s.setFrozenRows(1);
-    s.getRange(1, 1, 1, cfg.basliklar.length).createTextFinder(''); // no-op, bicim korunur
     for (var i = 1; i <= cfg.basliklar.length; i++) s.autoResizeColumn(i);
   });
 

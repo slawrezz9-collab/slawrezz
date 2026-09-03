@@ -19,8 +19,8 @@
      KURULUMDA DOLDURULACAK IKI ALAN
      Ikisini de KURULUM.md anlatiyor.
      ============================================================ */
-  var ADRES = 'BURAYA_APPS_SCRIPT_ADRESI';   // https://script.google.com/macros/s/..../exec
-  var ANAHTAR = 'BURAYA_GIZLI_ANAHTAR';      // gizliAnahtarUret() ciktisi
+  var ADRES = 'https://script.google.com/macros/s/AKfycbwOPa0XQaaP5dU4zGHlo8DEgSE7kM7Bt_tTLsV2Z5d8KPKhIVQbafm4_rbc_FbtoeQNvg/exec';
+  var ANAHTAR = '643b9154eebe4ee39334325d86d00036';
 
   /* Apps Script yavas olabilir; ama sonsuza kadar beklemek de olmaz. */
   var ZAMAN_ASIMI = 30000;
@@ -68,13 +68,26 @@
     pin: null,
     kullanici: Kutu.al(ANAHTARLAR.kullanici) || '',
     kurulu: function () {
+      /* Sayfa Apps Script'ten sunuluyorsa adres/anahtar gerekmez. */
+      if (Api.icerden()) return true;
       return ADRES.indexOf('script.google.com') >= 0 && ANAHTAR.indexOf('BURAYA') < 0;
     },
     adres: function () { return ADRES; },
 
+    /** Sayfa dogrudan Apps Script tarafindan mi sunuluyor? */
+    icerden: function () {
+      return typeof google !== 'undefined' && google.script && google.script.run;
+    },
+
     /**
-     * Tek istek yolu. Content-Type text/plain'dir: application/json,
-     * Apps Script'in cevaplayamadigi bir CORS preflight istegi tetikler.
+     * Tek istek yolu.
+     *
+     * IKI TASIYICI VAR:
+     *  1) Sayfa Apps Script'ten sunuluyorsa google.script.run kullanilir.
+     *     Adres, gizli anahtar, CORS derdi yoktur; Google zaten kimligi bilir.
+     *  2) Sayfa baska bir adreste (GitHub Pages) duruyorsa fetch kullanilir.
+     *     Content-Type text/plain'dir: application/json, Apps Script'in
+     *     cevaplayamadigi bir CORS preflight istegi tetikler.
      */
     cagir: function (op, ek) {
       var govde = Object.assign({
@@ -83,6 +96,8 @@
         pin: Api.pin,
         kullanici: Api.kullanici
       }, ek || {});
+
+      if (Api.icerden()) return Api.icerdenCagir(govde);
 
       if (!Api.kurulu()) {
         return Promise.reject(new Error(
@@ -138,6 +153,39 @@
           throw e;
         }
         throw h;
+      });
+    },
+
+    /** google.script.run — Apps Script sayfayi kendisi sunuyorsa kullanilir. */
+    icerdenCagir: function (govde) {
+      return new Promise(function (coz, red) {
+        var bitti = false;
+        var zamanAsimi = setTimeout(function () {
+          if (bitti) return;
+          bitti = true;
+          var z = new Error('Sunucu ' + Math.round(ZAMAN_ASIMI / 1000) +
+            ' saniyede cevap vermedi. Kayıt telefonda saklandı.');
+          z.cevrimdisi = true;
+          red(z);
+        }, ZAMAN_ASIMI);
+
+        google.script.run
+          .withSuccessHandler(function (metin) {
+            if (bitti) return;
+            bitti = true; clearTimeout(zamanAsimi);
+            try { coz(JSON.parse(metin)); }
+            catch (h) { red(new Error('Sunucudan beklenmeyen bir cevap geldi.')); }
+          })
+          .withFailureHandler(function (h) {
+            if (bitti) return;
+            bitti = true; clearTimeout(zamanAsimi);
+            /* Baglanti kopmasi da buraya duser; kayit kaybolmasin diye
+               cevrimdisi sayilir ve kuyruga alinir. */
+            var e = new Error((h && h.message) ? h.message : 'Sunucuya ulaşılamadı.');
+            e.cevrimdisi = true;
+            red(e);
+          })
+          .istek(JSON.stringify(govde));
       });
     },
 
