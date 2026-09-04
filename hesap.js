@@ -215,11 +215,51 @@
       return this.bircanMi(aciklama) && String(aciklama || '').indexOf('[') >= 0;
     },
 
-    /** Kasa'dan Bircan'a dogrudan giden odemeler (borc kapatan banka cikislari) */
-    bankadanOdemeler: function () {
+    /**
+     * DEVIR TARIHI — cari defterindeki "eski bakiye" satirinin tarihi.
+     *
+     * O satir, kendi tarihi ITIBARIYLA devreden borcu tek kalemde gosterir;
+     * yani o tarihe kadar yapilmis butun odemeler ZATEN icinde nettir.
+     * Bu yuzden o tarihe kadarki banka odemelerini borctan bir daha dusmek
+     * CIFT SAYMA olur. Devir satiri yoksa null doner ve butun banka
+     * odemeleri borcu duser.
+     */
+    devirTarihi: function () {
+      var gun = null;
+      (this.veri.siparisler || []).forEach(function (r) {
+        if (normAnahtar(r.urun).indexOf('eski bakiye') >= 0) {
+          if (!gun || String(r.t) > gun) gun = String(r.t);
+        }
+      });
+      return gun;
+    },
+
+    /** Kasa'dan dogrudan Bircan'a giden tum odemeler (devir oncesi + sonrasi). */
+    bankadanTumOdemeler: function () {
       var self = this;
       return this.kasa().filter(function (r) {
         return r.tur === 'Gider' && self.bircanaOdemeMi(r.aciklama);
+      });
+    },
+
+    /**
+     * Borcu DUSEN banka odemeleri: yalnizca devir tarihinden SONRAKILER.
+     * Oncekiler "eski bakiye" rakaminin icinde zaten sayilmistir.
+     */
+    bankadanOdemeler: function () {
+      var devir = this.devirTarihi();
+      if (!devir) return this.bankadanTumOdemeler();
+      return this.bankadanTumOdemeler().filter(function (r) {
+        return String(r.t) > devir;
+      });
+    },
+
+    /** Devir tarihine kadar yapilmis, "eski bakiye"ye dahil banka odemeleri. */
+    bankadanOdemelerDevirOncesi: function () {
+      var devir = this.devirTarihi();
+      if (!devir) return [];
+      return this.bankadanTumOdemeler().filter(function (r) {
+        return String(r.t) <= devir;
       });
     },
 
@@ -237,10 +277,15 @@
       var odenenBanka = topla(odBanka, function (r) { return r.tutar; });
       var odenen = odenenCari + odenenBanka;
 
+      var odBankaDevirOncesi = this.bankadanOdemelerDevirOncesi();
+
       return {
         sip: sip,
         od: odCari,
         odBanka: odBanka,
+        devir: this.devirTarihi(),
+        odBankaDevirOncesi: odBankaDevirOncesi,
+        odenenDevirOncesi: topla(odBankaDevirOncesi, function (r) { return r.tutar; }),
         malAlimi: malAlimi,
         acilis: acilis,
         netBorc: netBorc,
@@ -416,7 +461,11 @@
           odemeKirilimi;
       } else if (c.kalan > 0) {
         s.cari = 'Bircan Abi\'ye ' + F.para(c.kalan) + ' borcumuz var. Ondan ' +
-          F.para(c.malAlimi) + ' mal aldık, ' + F.para(c.odenen) + ' ödedik.' + odemeKirilimi;
+          F.para(c.malAlimi) + ' mal aldık, ' + F.para(c.odenen) + ' ödedik.' + odemeKirilimi +
+          (c.odenenDevirOncesi
+            ? ' Bundan önce ödenen ' + F.para(c.odenenDevirOncesi) + ' ise ' +
+              F.tarihUzun(c.devir) + ' tarihli “eski bakiye” rakamının içinde sayılmıştır.'
+            : '');
       } else {
         s.cari = 'Bircan Abi\'ye ' + F.para(Math.abs(c.kalan)) +
           ' fazla ödeme yapılmış görünüyor; bu tutar ondan alacağımızdır.';

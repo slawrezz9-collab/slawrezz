@@ -1356,11 +1356,51 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
       return this.bircanMi(aciklama) && String(aciklama || '').indexOf('[') >= 0;
     },
 
-    /** Kasa'dan Bircan'a dogrudan giden odemeler (borc kapatan banka cikislari) */
-    bankadanOdemeler: function () {
+    /**
+     * DEVIR TARIHI — cari defterindeki "eski bakiye" satirinin tarihi.
+     *
+     * O satir, kendi tarihi ITIBARIYLA devreden borcu tek kalemde gosterir;
+     * yani o tarihe kadar yapilmis butun odemeler ZATEN icinde nettir.
+     * Bu yuzden o tarihe kadarki banka odemelerini borctan bir daha dusmek
+     * CIFT SAYMA olur. Devir satiri yoksa null doner ve butun banka
+     * odemeleri borcu duser.
+     */
+    devirTarihi: function () {
+      var gun = null;
+      (this.veri.siparisler || []).forEach(function (r) {
+        if (normAnahtar(r.urun).indexOf('eski bakiye') >= 0) {
+          if (!gun || String(r.t) > gun) gun = String(r.t);
+        }
+      });
+      return gun;
+    },
+
+    /** Kasa'dan dogrudan Bircan'a giden tum odemeler (devir oncesi + sonrasi). */
+    bankadanTumOdemeler: function () {
       var self = this;
       return this.kasa().filter(function (r) {
         return r.tur === 'Gider' && self.bircanaOdemeMi(r.aciklama);
+      });
+    },
+
+    /**
+     * Borcu DUSEN banka odemeleri: yalnizca devir tarihinden SONRAKILER.
+     * Oncekiler "eski bakiye" rakaminin icinde zaten sayilmistir.
+     */
+    bankadanOdemeler: function () {
+      var devir = this.devirTarihi();
+      if (!devir) return this.bankadanTumOdemeler();
+      return this.bankadanTumOdemeler().filter(function (r) {
+        return String(r.t) > devir;
+      });
+    },
+
+    /** Devir tarihine kadar yapilmis, "eski bakiye"ye dahil banka odemeleri. */
+    bankadanOdemelerDevirOncesi: function () {
+      var devir = this.devirTarihi();
+      if (!devir) return [];
+      return this.bankadanTumOdemeler().filter(function (r) {
+        return String(r.t) <= devir;
       });
     },
 
@@ -1378,10 +1418,15 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
       var odenenBanka = topla(odBanka, function (r) { return r.tutar; });
       var odenen = odenenCari + odenenBanka;
 
+      var odBankaDevirOncesi = this.bankadanOdemelerDevirOncesi();
+
       return {
         sip: sip,
         od: odCari,
         odBanka: odBanka,
+        devir: this.devirTarihi(),
+        odBankaDevirOncesi: odBankaDevirOncesi,
+        odenenDevirOncesi: topla(odBankaDevirOncesi, function (r) { return r.tutar; }),
         malAlimi: malAlimi,
         acilis: acilis,
         netBorc: netBorc,
@@ -1557,7 +1602,11 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
           odemeKirilimi;
       } else if (c.kalan > 0) {
         s.cari = 'Bircan Abi\'ye ' + F.para(c.kalan) + ' borcumuz var. Ondan ' +
-          F.para(c.malAlimi) + ' mal aldık, ' + F.para(c.odenen) + ' ödedik.' + odemeKirilimi;
+          F.para(c.malAlimi) + ' mal aldık, ' + F.para(c.odenen) + ' ödedik.' + odemeKirilimi +
+          (c.odenenDevirOncesi
+            ? ' Bundan önce ödenen ' + F.para(c.odenenDevirOncesi) + ' ise ' +
+              F.tarihUzun(c.devir) + ' tarihli “eski bakiye” rakamının içinde sayılmıştır.'
+            : '');
       } else {
         s.cari = 'Bircan Abi\'ye ' + F.para(Math.abs(c.kalan)) +
           ' fazla ödeme yapılmış görünüyor; bu tutar ondan alacağımızdır.';
@@ -2670,17 +2719,35 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
         tablo: 'kasa',
         baslik: 'Bankadan Bircan Abi\'ye ödemeler',
         aciklama: 'Banka hesabından doğrudan ona gönderilenler. Bu satırlar Giderler ' +
-                  'sayfasından düzenlenir; borcumuzdan da düşülür.',
-        satirlar: function () { return H().bankadanOdemeler().slice().reverse(); },
+                  'sayfasından düzenlenir. Devir tarihinden sonrakiler borcumuzu düşürür; ' +
+                  'öncekiler “eski bakiye” rakamının içinde zaten sayılmıştır.',
+        satirlar: function () {
+          var devir = H().devirTarihi();
+          return H().bankadanTumOdemeler().map(function (r) {
+            return Object.assign({}, r, { devirOncesi: !!devir && String(r.t) <= devir });
+          }).reverse();
+        },
         yon: function () { return 'gider'; },
         duzenle: false,
         kolonlar: [
           { etiket: 'Tarih', anahtar: 't', hucre: function (r) { return F.tarih(r.t); }, ham: function (r) { return F.tarih(r.t); } },
           { etiket: 'Açıklama', anahtar: 'aciklama' },
+          { etiket: 'Borca etkisi', anahtar: 'devirOncesi',
+            hucre: function (r) {
+              return r.devirOncesi
+                ? '<span class="rozet">eski bakiyeye dahil</span>'
+                : '<span class="azalan">borcu düşürdü</span>';
+            },
+            ham: function (r) { return r.devirOncesi ? 'eski bakiyeye dahil' : 'borcu düşürdü'; } },
           { etiket: 'Ödediğimiz', anahtar: 'tutar', sag: true, hucre: function (r) { return '<span class="azalan">−' + F.para(r.tutar) + '</span>'; }, ham: function (r) { return r.tutar; } }
         ],
         mobilBaslik: function (r) { return kacir(r.aciklama); },
-        mobilAlt: function (r) { return '<span>' + F.tarih(r.t) + '</span><span>banka hesabı</span>'; },
+        mobilAlt: function (r) {
+          return '<span>' + F.tarih(r.t) + '</span>' +
+            (r.devirOncesi
+              ? '<span class="rozet">eski bakiyeye dahil</span>'
+              : '<span>borcu düşürdü</span>');
+        },
         mobilTutar: function (r) { return '<span class="azalan">−' + F.para(r.tutar) + '</span>'; },
         toplamlar: function (liste) {
           return {
@@ -2940,9 +3007,11 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
         '</div>' +
 
         '<div class="serit">' +
-          '<b>Bircan Abi\'ye yapılan ödemeler de burada görünür</b>, çünkü para gerçekten ' +
-          'bankadan çıkmıştır. Aynı ödemeler Cari Hesap sayfasında <b>borcumuzu düşürür</b>. ' +
-          'Bu çift sayma değildir: bir kez para çıkışı, bir kez borç azalması.' +
+          '<b>Bircan Abi\'ye yapılan ödemeler de burada görünür</b>, çünkü para gerçekten '  +
+          'bankadan çıkmıştır. Bunlardan <b>devir tarihinden sonra</b> yapılanlar Cari Hesap ' +
+          'sayfasında ayrıca borcumuzu düşürür — bu çift sayma değildir: bir kez para çıkışı, ' +
+          'bir kez borç azalması. Devir tarihinden önceki ödemeler ise “eski bakiye” ' +
+          'rakamının içinde zaten sayılmıştır, borçtan bir daha düşülmez.' +
         '</div>' +
 
         '<div class="izgara dort">' +
@@ -3002,10 +3071,21 @@ table.t tbody tr:hover { background: color-mix(in srgb, var(--yuzey-2) 55%, tran
           'Kalan bakiye <b>bizim ona borcumuzdur</b>.' +
         '</div>' +
 
+        (c.devir
+          ? '<div class="serit dikkat">' +
+              'Cari defterindeki <b>“eski bakiye”</b> satırı, <b>' + F.tarihUzun(c.devir) +
+              '</b> itibarıyla devreden borcu tek kalemde gösterir. O tarihe kadar bankadan ' +
+              'Bircan Abi\'ye ödenen <b>' + F.para(c.odenenDevirOncesi) + '</b> ' +
+              '(' + c.odBankaDevirOncesi.length + ' ödeme) bu rakamın <b>içinde zaten ' +
+              'sayılmıştır</b>; borçtan bir daha düşülmez. Borcu yalnızca bu tarihten ' +
+              '<b>sonraki</b> ödemeler azaltır.' +
+            '</div>'
+          : '') +
+
         '<div class="izgara dort">' +
           kutu('Ondan aldığımız mal', F.para(c.malAlimi), c.sip.length + ' alım satırı', 'mavi') +
           kutu('Bankadan ödediğimiz', '<span class="azalan">' + F.para(c.odenenBanka) + '</span>',
-               c.odBanka.length + ' ödeme', 'gider') +
+               c.odBanka.length + ' ödeme' + (c.devir ? ' · devir sonrası' : ''), 'gider') +
           kutu('Cari defterinden ödediğimiz', '<span class="azalan">' + F.para(c.odenenCari) + '</span>',
                c.od.length + ' ödeme', 'gider') +
           kutu('Toplam ödenen', '<span class="azalan">' + F.para(c.odenen) + '</span>',

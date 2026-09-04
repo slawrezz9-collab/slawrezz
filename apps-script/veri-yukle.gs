@@ -409,20 +409,41 @@ function dogrula() {
   var diger = giderler.filter(function (r) { return !bircanMi(r.aciklama); });
   var T = function (a) { return a.reduce(function (t, r) { return t + r.tutar; }, 0); };
 
+  /* DEVIR TARIHI: cari defterindeki "eski bakiye" satirinin tarihi.
+     O satir kendi tarihi ITIBARIYLA devreden borctur; o tarihe kadar yapilmis
+     banka odemeleri zaten onun icinde nettir. Bir daha dusulmesi CIFT SAYMA
+     olur. Bu yuzden borcu yalnizca devir tarihinden SONRAKI odemeler duser. */
+  var devir = '';
+  sip.forEach(function (r) {
+    if (String(r.urun || '').replace(/[İIıi]/g, 'i').toLowerCase().indexOf('eski bakiye') >= 0) {
+      if (!devir || String(r.t) > devir) devir = String(r.t);
+    }
+  });
+  var bircanOdemeSonrasi = devir
+    ? bircanOdeme.filter(function (r) { return String(r.t) > devir; })
+    : bircanOdeme;
+  var bircanOdemeOncesi = bircanOdeme.filter(function (r) {
+    return bircanOdemeSonrasi.indexOf(r) < 0;
+  });
+
   var odenenCari = od.reduce(function (t, r) { return t + r.tutar; }, 0);
-  var odenenBanka = T(bircanOdeme);
+  var odenenBanka = T(bircanOdemeSonrasi);
   var odenen = odenenCari + odenenBanka;
+
+  Logger.log('Devir tarihi: %s  (bu tarihe kadarki banka odemeleri "eski bakiye"ye dahildir)',
+    devir || 'yok');
 
   var satirlar = [
     ['Ondan aldigimiz mal', malAlimi, 546560],
     ['Acilis mahsubu', acilis, 0],
     ['Cari defterinden odenen', odenenCari, 68500],
-    ['Bankadan odenen', odenenBanka, 219000],
-    ['Toplam odenen', odenen, 287500],
-    ['KALAN BORCUMUZ', netBorc - odenen, 259060],
+    ['Bankadan odenen (devir sonrasi)', odenenBanka, 0],
+    ['Devir oncesi banka odemesi', T(bircanOdemeOncesi), 219000],
+    ['Toplam odenen', odenen, 68500],
+    ['KALAN BORCUMUZ', netBorc - odenen, 478060],
     ['Banka geliri', T(gelirler), 671771],
     ['Banka gideri', T(giderler), 476700],
-    ["  Bircan'a mal odemesi", odenenBanka, 219000],
+    ["  Bircan'a mal odemesi", T(bircanOdeme), 219000],
     ['  Bircan odeme kaydi', bircanOdeme.length, 9],
     ['  Bircan isi masrafi', T(bircanIs), 47600],
     ['  Bircan isi kaydi', bircanIs.length, 3],

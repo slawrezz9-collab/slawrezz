@@ -175,17 +175,35 @@
         tablo: 'kasa',
         baslik: 'Bankadan Bircan Abi\'ye ödemeler',
         aciklama: 'Banka hesabından doğrudan ona gönderilenler. Bu satırlar Giderler ' +
-                  'sayfasından düzenlenir; borcumuzdan da düşülür.',
-        satirlar: function () { return H().bankadanOdemeler().slice().reverse(); },
+                  'sayfasından düzenlenir. Devir tarihinden sonrakiler borcumuzu düşürür; ' +
+                  'öncekiler “eski bakiye” rakamının içinde zaten sayılmıştır.',
+        satirlar: function () {
+          var devir = H().devirTarihi();
+          return H().bankadanTumOdemeler().map(function (r) {
+            return Object.assign({}, r, { devirOncesi: !!devir && String(r.t) <= devir });
+          }).reverse();
+        },
         yon: function () { return 'gider'; },
         duzenle: false,
         kolonlar: [
           { etiket: 'Tarih', anahtar: 't', hucre: function (r) { return F.tarih(r.t); }, ham: function (r) { return F.tarih(r.t); } },
           { etiket: 'Açıklama', anahtar: 'aciklama' },
+          { etiket: 'Borca etkisi', anahtar: 'devirOncesi',
+            hucre: function (r) {
+              return r.devirOncesi
+                ? '<span class="rozet">eski bakiyeye dahil</span>'
+                : '<span class="azalan">borcu düşürdü</span>';
+            },
+            ham: function (r) { return r.devirOncesi ? 'eski bakiyeye dahil' : 'borcu düşürdü'; } },
           { etiket: 'Ödediğimiz', anahtar: 'tutar', sag: true, hucre: function (r) { return '<span class="azalan">−' + F.para(r.tutar) + '</span>'; }, ham: function (r) { return r.tutar; } }
         ],
         mobilBaslik: function (r) { return kacir(r.aciklama); },
-        mobilAlt: function (r) { return '<span>' + F.tarih(r.t) + '</span><span>banka hesabı</span>'; },
+        mobilAlt: function (r) {
+          return '<span>' + F.tarih(r.t) + '</span>' +
+            (r.devirOncesi
+              ? '<span class="rozet">eski bakiyeye dahil</span>'
+              : '<span>borcu düşürdü</span>');
+        },
         mobilTutar: function (r) { return '<span class="azalan">−' + F.para(r.tutar) + '</span>'; },
         toplamlar: function (liste) {
           return {
@@ -445,9 +463,11 @@
         '</div>' +
 
         '<div class="serit">' +
-          '<b>Bircan Abi\'ye yapılan ödemeler de burada görünür</b>, çünkü para gerçekten ' +
-          'bankadan çıkmıştır. Aynı ödemeler Cari Hesap sayfasında <b>borcumuzu düşürür</b>. ' +
-          'Bu çift sayma değildir: bir kez para çıkışı, bir kez borç azalması.' +
+          '<b>Bircan Abi\'ye yapılan ödemeler de burada görünür</b>, çünkü para gerçekten '  +
+          'bankadan çıkmıştır. Bunlardan <b>devir tarihinden sonra</b> yapılanlar Cari Hesap ' +
+          'sayfasında ayrıca borcumuzu düşürür — bu çift sayma değildir: bir kez para çıkışı, ' +
+          'bir kez borç azalması. Devir tarihinden önceki ödemeler ise “eski bakiye” ' +
+          'rakamının içinde zaten sayılmıştır, borçtan bir daha düşülmez.' +
         '</div>' +
 
         '<div class="izgara dort">' +
@@ -507,10 +527,21 @@
           'Kalan bakiye <b>bizim ona borcumuzdur</b>.' +
         '</div>' +
 
+        (c.devir
+          ? '<div class="serit dikkat">' +
+              'Cari defterindeki <b>“eski bakiye”</b> satırı, <b>' + F.tarihUzun(c.devir) +
+              '</b> itibarıyla devreden borcu tek kalemde gösterir. O tarihe kadar bankadan ' +
+              'Bircan Abi\'ye ödenen <b>' + F.para(c.odenenDevirOncesi) + '</b> ' +
+              '(' + c.odBankaDevirOncesi.length + ' ödeme) bu rakamın <b>içinde zaten ' +
+              'sayılmıştır</b>; borçtan bir daha düşülmez. Borcu yalnızca bu tarihten ' +
+              '<b>sonraki</b> ödemeler azaltır.' +
+            '</div>'
+          : '') +
+
         '<div class="izgara dort">' +
           kutu('Ondan aldığımız mal', F.para(c.malAlimi), c.sip.length + ' alım satırı', 'mavi') +
           kutu('Bankadan ödediğimiz', '<span class="azalan">' + F.para(c.odenenBanka) + '</span>',
-               c.odBanka.length + ' ödeme', 'gider') +
+               c.odBanka.length + ' ödeme' + (c.devir ? ' · devir sonrası' : ''), 'gider') +
           kutu('Cari defterinden ödediğimiz', '<span class="azalan">' + F.para(c.odenenCari) + '</span>',
                c.od.length + ' ödeme', 'gider') +
           kutu('Toplam ödenen', '<span class="azalan">' + F.para(c.odenen) + '</span>',
