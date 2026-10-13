@@ -19,8 +19,8 @@
      KURULUMDA DOLDURULACAK IKI ALAN
      Ikisini de KURULUM.md anlatiyor.
      ============================================================ */
-  var ADRES = 'https://script.google.com/macros/s/AKfycbwOPa0XQaaP5dU4zGHlo8DEgSE7kM7Bt_tTLsV2Z5d8KPKhIVQbafm4_rbc_FbtoeQNvg/exec';
-  var ANAHTAR = '643b9154eebe4ee39334325d86d00036';
+var ADRES = 'https://script.google.com/macros/s/AKfycbzCprfY7pG88wS-3ui66p7w6EU5Umu122Q5uuXHW3oymznwYwF-uS749n7AWbugDij0/exec';
+var ANAHTAR = '6e3e5e814fcb4ff08d7e07e420ff76aa';
 
   /* Apps Script yavas olabilir; ama sonsuza kadar beklemek de olmaz. */
   var ZAMAN_ASIMI = 30000;
